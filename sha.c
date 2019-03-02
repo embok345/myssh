@@ -62,26 +62,30 @@ sha_256_blocks_t *preprocess_sha_256(const byte_array_t in) {
 }
 
 uint32_t rotate_bits(uint32_t x, int8_t n) {
-  return (x>>n) + (x&(1<<(n-1)))<<(32-n);
+  return (x>>n) + (x<<(32-n));
 }
 
 uint32_t sha256_sigma_0(uint32_t x) {
   return rotate_bits(x, 7) ^ rotate_bits(x, 18) ^ (x>>3);
+  //return (x>>7) ^ (x>>18) ^ rotate_bits(x, 3);
 }
 uint32_t sha256_sigma_1(uint32_t x) {
   return rotate_bits(x, 17) ^ rotate_bits(x, 19) ^ (x>>10);
+  //return (x>>17) ^ (x>>19) ^ rotate_bits(x, 10);
 }
 
 uint32_t sha256_Sigma_0(uint32_t x) {
   return rotate_bits(x, 2) ^ rotate_bits(x, 13) ^ rotate_bits(x, 22);
+  //return (x>>2) ^ (x>>13) ^ (x>>22);
 }
 
 uint32_t sha256_Sigma_1(uint32_t x) {
   return rotate_bits(x, 6) ^ rotate_bits(x, 11) ^ rotate_bits(x, 25);
+  //return (x>>6) ^ (x>>11) ^ (x>>25);
 }
 
 uint32_t sha256_ch(uint32_t x, uint32_t y, uint32_t z) {
-  return (x&y) ^ ~(x&z);
+  return (x&y) ^ ((~x)&z);
 }
 uint32_t sha256_maj(uint32_t x, uint32_t y, uint32_t z) {
   return (x&y) ^ (x&z) ^ (y&z);
@@ -97,7 +101,7 @@ void sha_256(byte_array_t in) {
     intermediate_hash[i] = SHA256_INIT[i];
   }
 
-  for(uint32_t i=1; i<=blocks.noBlocks; i++) {
+  for(uint32_t i=0; i<blocks.noBlocks; i++) {
     for(uint8_t j=0; j<8; j++) {
       registers[j] = intermediate_hash[j];
     }
@@ -127,15 +131,22 @@ void sha_256(byte_array_t in) {
       registers[0] = temp1 + temp2;
     }
     for(uint8_t j=0; j<8; j++) {
-      intermediate_hash[j] = registers[j] + intermediate_hash[j];
+      intermediate_hash[j] += registers[j];
+      printf("%x\n", intermediate_hash[j]);
     }
+    printf("\n");
+  }
+  for(uint8_t i=0; i<8; i++) {
+    printf("%x\n", intermediate_hash[i]);
   }
 }
 
-int main() {
-  uint8_t *s = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+/*int main() {
+  //uint8_t *s = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+  //uint8_t *s = "abc";
+  uint8_t *s = "";
   byte_array_t str = {strlen(s), s};
   sha_256(str);
 
   return 0;
-}
+}*/
