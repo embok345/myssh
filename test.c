@@ -43,10 +43,12 @@ packet bytes_to_packet(uint8_t *, int);
 packet build_kex_init();
 packet build_packet(uint8_t *, uint32_t);
 void int_to_bytes(uint32_t, uint8_t *);
+void mpint_to_bignum(uint8_t *, uint32_t, bignum *);
 
 int main() {
 
   srand(time(NULL));
+  register_printf_specifier('B', bn_printf, bn_printf_info);
 
   int sock;
   struct sockaddr_in dest;
@@ -60,7 +62,7 @@ int main() {
 
   connect(sock, (struct sockaddr *)&dest, sizeof(struct sockaddr_in));
 
-  init_connection(sock);
+  //init_connection(sock);
   kex_init(sock);
 
   return 0;
@@ -105,92 +107,142 @@ uint32_t packet_to_bytes(packet p, uint8_t **bytes) {
   return p.packet_length + 4; //+mac length
 }
 
+void mpint_to_bignum(uint8_t *blocks, uint32_t len, bignum *out) {
+  bn_resize(out, len);
+  for(uint32_t i=0; i<len; i++) {
+    bn_setBlock(out, i, blocks[len-i-1]);
+  }
+  bn_removezeros(out);
+}
+
 void kex_init(int sock) {
+
   pthread_t tid;
   pthread_create(&tid, NULL, listener_thread, (void *)&sock);
 
-  packet pak = build_kex_init();
-  uint8_t *bytes;
-  uint32_t messageLen = packet_to_bytes(pak, &bytes);
-  send(sock, bytes+1, messageLen, 0);
+  int identification_c_string_len = strlen(VERSION)+11;
+  uint8_t *identification_c_string = malloc(identification_c_string_len);
+  snprintf(identification_c_string, identification_c_string_len,
+      "SSH-2.0-%s\r\n", VERSION);
+  send(sock, identification_c_string, identification_c_string_len, 0);
 
-  free(bytes);
-  byte_array *ret;
-  pthread_join(tid, (void **)&ret);
+  byte_array *identification_s_string;
+  pthread_join(tid, (void **)&identification_s_string);
+  while(identification_s_string->len < 4 ||
+      memcmp(identification_s_string->arr, "SSH-", 3)!=0) {
+    //Then the command didn't start with "SSH-"
+    //So keep listening
+    //free(arr.arr);
+    pthread_create(&tid, NULL, listener_thread, (void *)&sock);
+    pthread_join(tid, (void **)&identification_s_string);
+  }
+
+  //remote_constr now starts with "SSH-"
+  if(identification_s_string->len<8 ||
+      memcmp(identification_s_string->arr+4, "2.0-", 4)!=0) {
+    //Not a valid ssh protocol version
+    printf("Invalid protocol\n");
+    return;
+  }
+
+  printf("%s", identification_c_string);
+  printf("%s", identification_s_string->arr);
+
+  pthread_create(&tid, NULL, listener_thread, (void *)&sock);
+
+  packet kex_init_c_pak = build_kex_init();
+  uint8_t *kex_init_c_bytes;
+  uint32_t messageLen = packet_to_bytes(kex_init_c_pak, &kex_init_c_bytes);
+  send(sock, kex_init_c_bytes+1, messageLen, 0);
+  free(kex_init_c_bytes);
+
+  byte_array *kex_init_s_bytes;
+  pthread_join(tid, (void **)&kex_init_s_bytes);
+  packet kex_init_s_pak = bytes_to_packet(kex_init_s_bytes->arr,
+      kex_init_s_bytes->len);
   //We should really check here that the algorithms match up
-
 
   bignum *p, *g, *x, *e;
   bn_inits(4, &p, &g, &x, &e);
   bn_set(p, 256, DH_14_BLOCKS, 1);
   bn_conv_int2bn(2, g);
   bn_rand(x, p);
-  //bn_powmod(g, x, p, e);
+  bn_powmod(g, x, p, e);
+  printf("e = %B\n", e);
 
-  //uint32_t len = bn_trueLength(e);
-  //bytes = malloc(len+6);
-  bytes = malloc(7);
+  uint32_t e_len = bn_trueLength(e);
+  uint8_t *kex_dh_init_payload = malloc(e_len+6);
+  kex_dh_init_payload[0] = SSH_MSG_KEXDH_INIT;
+  int_to_bytes((bn_getBlock(e, e_len-1)>=128) ? e_len+1 : e_len,
+      kex_dh_init_payload+1);
+  int offset = 5;
+  if(bn_getBlock(e, e_len-1)>=128) {
+    kex_dh_init_payload[5] = 0;
+    offset++;
+  }
+  for(int i=0; i<e_len; i++) {
+    kex_dh_init_payload[i+offset] = bn_getBlock(e, e_len-i-1);
+  }
+  packet kex_dh_init_pak = build_packet(kex_dh_init_payload, e_len+offset);
+
+  /*bytes = malloc(7);
   bytes[0] = SSH_MSG_KEXDH_INIT;
   int_to_bytes(2, bytes+1);
   bytes[5]=3;
   bytes[6]=233;
-  /*int_to_bytes((bn_getBlock(e, len-1)>128) ? len+1 : len, bytes+1);
-  int offset = 5;
-  if(bn_getBlock(e, len-1)>128) {
-    bytes[5] = 0;
-    offset++;
-  }
-  for(int i=0; i<len; i++) {
-    bytes[i+offset] = bn_getBlock(e, len-i-1);
-  }*/
-  pak = build_packet(bytes, 7);
+  pak = build_packet(bytes, 7);*/
 
-  uint8_t *newBytes;
-  uint32_t packetLength = packet_to_bytes(pak, &newBytes);
-  send(sock, newBytes+1, packetLength, 0);
+  uint8_t *kex_dh_init_bytes;
+  messageLen = packet_to_bytes(kex_dh_init_pak, &kex_dh_init_bytes);
+  send(sock, kex_dh_init_bytes+1, messageLen, 0);
 
-  free(newBytes);
-  newBytes = malloc(35000);
+  printf("Sent key\n");
+  free(kex_dh_init_bytes);
+
+  pthread_create(&tid, NULL, listener_thread, (void *)&sock);
+
+  byte_array *kex_dh_reply_bytes;
+  pthread_join(tid, (void **)&kex_dh_reply_bytes);
+  packet kex_dh_reply_pak = bytes_to_packet(kex_dh_reply_bytes->arr,
+      kex_dh_reply_bytes->len);
+
+  /*uint8_t * = malloc(35000);
   uint32_t receivedBytes = recv(sock, newBytes, 35000, 0);
   newBytes = realloc(newBytes, receivedBytes);
   pak = bytes_to_packet(newBytes, receivedBytes);
-  printf("%"PRIu32"\n", pak.packet_length);
-  printf("%"PRIu8"\n", pak.padding_length);
-  for(uint32_t i=0; i<pak.packet_length-pak.padding_length-1; i++) {
-    (isalnum(pak.payload[i])) ? printf("%c ", pak.payload[i]) : printf("%"PRIu8" ", pak.payload[i]);
-  }
-  printf("\n");
-  for(uint8_t i=0; i<pak.padding_length; i++) {
-    printf("%"PRIu8" ", pak.padding[i]);
-  }
-  printf("\n");
-  if(pak.payload[0] == SSH_MSG_KEXDH_REPLY) {
-    uint32_t len_K_S = bytes_to_int(pak.payload+1);
+  //printf("received packet length: %"PRIu32"\n", pak.packet_length);
+  //printf("received padding length: %"PRIu8"\n", pak.padding_length);
+*/
+  if(kex_dh_reply_pak.payload[0] == SSH_MSG_KEXDH_REPLY) {
+    uint32_t len_K_S = bytes_to_int(kex_dh_reply_pak.payload+1);
     uint8_t *K_S = malloc(len_K_S);
-    memcpy(K_S, pak.payload+5,len_K_S);
-    printf("%"PRIu32"\n", len_K_S);
-    uint32_t len_f = bytes_to_int(pak.payload+5+len_K_S);
-    uint8_t *f = malloc(len_f);
-    memcpy(f, pak.payload+9+len_K_S, len_f);
-    printf("%"PRIu32"\n", len_f);
-    uint32_t len_sig = bytes_to_int(pak.payload+9+len_K_S+len_f);
-    uint8_t *sig = malloc(len_sig);
-    memcpy(sig, pak.payload+13+len_K_S+len_f, len_sig);
+    memcpy(K_S, kex_dh_reply_pak.payload+5,len_K_S);
 
-    for(uint32_t i=0; i<len_K_S; i++) {
-      (isalnum(K_S[i])) ? printf("%c ", K_S[i]) : printf("%"PRIu8" ", K_S[i]);
+    uint32_t len_f = bytes_to_int(kex_dh_reply_pak.payload+5+len_K_S);
+    uint8_t *f_bytes = malloc(len_f);
+    memcpy(f_bytes, kex_dh_reply_pak.payload+9+len_K_S, len_f);
+    bignum *f;
+    bn_init(&f);
+    mpint_to_bignum(f_bytes, len_f, f);
+    printf("f = %B\n", f);
+    bignum *K;
+    bn_init(&K);
+    bn_powmod(f, x, p, K);
+    printf("K = %B\n", K);
+
+    uint32_t len_sig = bytes_to_int(kex_dh_reply_pak.payload+9+len_K_S+len_f);
+    uint8_t *sig = malloc(len_sig);
+    memcpy(sig, kex_dh_reply_pak.payload+13+len_K_S+len_f, len_sig);
+
+    for(int i=0; i<strlen(identification_c_string); i++) {
+      printf("%"PRId8" ", identification_c_string[i]);
     }
     printf("\n");
-    for(uint32_t i=0; i<len_f; i++) {
-      (isalnum(f[i])) ? printf("%c ", f[i]) : printf("%"PRIu8" ", f[i]);
-    }
-    printf("\n");
-    for(uint32_t i=0; i<len_sig; i++) {
-      (isalnum(sig[i])) ? printf("%c ", sig[i]) : printf("%"PRIu8" ", sig[i]);
+    for(int i=0; i<strlen(identification_s_string->arr); i++) {
+      printf("%"PRId8" ", identification_s_string->arr[i]);
     }
     printf("\n");
   }
-
 }
 
 int init_connection(int sock) {
