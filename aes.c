@@ -5,8 +5,8 @@
 #include <math.h>
 #include "myssh.h"
 
-#define KEY_SIZE 32
-#define NO_ROUNDS ((KEY_SIZE/4)+6)
+//#define KEY_SIZE 32
+//#define NO_ROUNDS ((KEY_SIZE/4)+6)
 
 const uint32_t RCON[11] = {0, 1<<24, 2<<24, 4<<24, 8<<24, 0x10<<24, 0x20<<24, 0x40<<24, 0x80<<24, 0x1B<<24, 0x36<<24};
 
@@ -50,7 +50,9 @@ typedef struct state_matrix {
 } state_matrix;
 
 typedef struct keys {
-  uint32_t w[4*(NO_ROUNDS+1)];
+  uint8_t key_size; //=16, 24, or 32
+  //uint32_t w[4*(NO_ROUNDS+1)];
+  uint32_t *w; //
 } keys;
 
 void print_sm(state_matrix s) {
@@ -70,12 +72,12 @@ state_matrix zero_matrix() {
     }
   }
 }
-keys zero_keys() {
+/*keys zero_keys() {
   keys k;
   for(int i=0; i<4*(NO_ROUNDS+1); i++) {
     k.w[i] = 0;
   }
-}
+}*/
 
 state_matrix add_round_key(state_matrix in, uint32_t keys[4]) {
   //printf("%x, %x, %x, %x\n", keys[0], keys[1], keys[2], keys[3]);
@@ -222,13 +224,18 @@ uint32_t rot_word(uint32_t in) {
 }
 
 keys expand_key(const byte_array_t k) {
-  keys ks = zero_keys();
+  if(k.len!=16 && k.len!=24 && k.len!=32) {
+    printf("This aint right\n");
+    //TODO return something here.
+  }
+  uint8_t no_rounds = (k.len/4) + 6;
+  keys ks;
+  ks.key_size = k.len;
+  ks.w = malloc(sizeof(uint32_t) * 4 * (no_rounds+1));
   uint32_t temp;
   int i=0;
-  while(i<KEY_SIZE/4) {
-    //ks.w[i] = k[i];
+  while(i<ks.key_size/4) {
     ks.w[i] = 0;
-    //ks.w[i] = (((uint32_t)k.arr[4*i])<<24) + (((uint32_t)k.arr[4*i+1])<<16) + (((uint32_t)k.arr[4*i+2])<<8) + (uint32_t)k.arr[4*i+3];
     for(int j=0; j<4; j++) {
       ks.w[i] <<= 8;
       if(4*i + j < k.len)
@@ -237,25 +244,17 @@ keys expand_key(const byte_array_t k) {
     i++;
   }
 
-  while(i<4*(NO_ROUNDS+1)) {
+  while(i<4*(no_rounds+1)) {
     temp = ks.w[i-1];
-    if(i%(KEY_SIZE/4) == 0) {
+    if(i%(ks.key_size/4) == 0) {
       temp = rot_word(temp);
-      //printf("after rot_word = %x\n", temp);
       temp = sub_word(temp);
-      //printf("after sub_word = %x\n", temp);
-      //printf("rcon = %x\n", RCON[i/KEY_SIZE]);
-      temp ^= RCON[i/(KEY_SIZE/4)];
-      //printf("after xor with rcon = %x\n", temp);
-    } else if((KEY_SIZE/4) > 6 && (i%(KEY_SIZE/4) == 4)) {
+      temp ^= RCON[i/(ks.key_size/4)];
+    } else if((ks.key_size/4) > 6 && (i%(ks.key_size/4) == 4)) {
       temp = sub_word(temp);
-      //printf("after sub_word = %x\n", temp);
     }
-    //printf("w[i-Nk] = %x\n", ks.w[i-KEY_SIZE]);
-    ks.w[i] = ks.w[i-(KEY_SIZE/4)] ^ temp;
-    //printf("w[i] = %x\n", ks.w[i]);
+    ks.w[i] = ks.w[i-(ks.key_size/4)] ^ temp;
     i++;
-    //printf("\n");
   }
 
   return ks;
@@ -263,56 +262,41 @@ keys expand_key(const byte_array_t k) {
 
 state_matrix __aes__(state_matrix in, keys k) {
   state_matrix state = in;
-
-  //printf("input:\n");print_sm(state);printf("\n");
+  uint8_t no_rounds = (k.key_size/4) + 6;
 
   uint32_t roundKeys[4] = {k.w[0], k.w[1], k.w[2], k.w[3]};
   state = add_round_key(state, roundKeys);
 
-  for(int round = 1; round<NO_ROUNDS; round++) {
-    //printf("start of round %d:\n", round);
-    //print_sm(state);printf("\n");
+  for(int round = 1; round<no_rounds; round++) {
     state = sub_bytes(state);
-    //printf("After subbytes:\n");
-    //print_sm(state);printf("\n");
     state = shift_rows(state);
-    //printf("After shiftrows:\n");
-    //print_sm(state);printf("\n");
     state = mix_columns(state);
-    //printf("After mixbytes:\n");
-    //print_sm(state);printf("\n");
     roundKeys[0] = k.w[round*4];
     roundKeys[1] = k.w[round*4 + 1];
     roundKeys[2] = k.w[round*4 + 2];
     roundKeys[3] = k.w[round*4 + 3];
-    //printf("Round keys:\n");
-    //printf("%x\n%x\n%x\n%x\n", roundKeys[0], roundKeys[1], roundKeys[2], roundKeys[3]);
     state = add_round_key(state, roundKeys);
-    //printf("\n");
   }
 
   state = sub_bytes(state);
   state = shift_rows(state);
-  roundKeys[0] = k.w[NO_ROUNDS*4];
-  roundKeys[1] = k.w[NO_ROUNDS*4 + 1];
-  roundKeys[2] = k.w[NO_ROUNDS*4 + 2];
-  roundKeys[3] = k.w[NO_ROUNDS*4 + 3];
+  roundKeys[0] = k.w[no_rounds*4];
+  roundKeys[1] = k.w[no_rounds*4 + 1];
+  roundKeys[2] = k.w[no_rounds*4 + 2];
+  roundKeys[3] = k.w[no_rounds*4 + 3];
   state = add_round_key(state, roundKeys);
-
-  /*printf("Output:\n");
-  print_sm(state);
-  printf("\n");*/
 
   return state;
 }
 
 state_matrix __inv_aes__(state_matrix in, keys k) {
   state_matrix state = in;
-  uint32_t roundKeys[4] = {k.w[NO_ROUNDS*4], k.w[NO_ROUNDS*4+1],
-                           k.w[NO_ROUNDS*4+2], k.w[NO_ROUNDS*4+3]};
+  uint8_t no_rounds = (k.key_size/4) + 6;
+  uint32_t roundKeys[4] = {k.w[no_rounds*4], k.w[no_rounds*4+1],
+                           k.w[no_rounds*4+2], k.w[no_rounds*4+3]};
   state = add_round_key(state, roundKeys);
 
-  for(int round=NO_ROUNDS-1; round>=1; round--) {
+  for(int round=no_rounds-1; round>=1; round--) {
     state = inv_shift_rows(state);
     state = inv_sub_bytes(state);
     roundKeys[0] = k.w[round*4];
@@ -367,27 +351,23 @@ void increment_byte_array(byte_array_t *in) {
 }
 
 int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t *ctr, byte_array_t *out) {
-  if(in.len%16 != 0 || key.len!=KEY_SIZE || ctr->len != 16) {
-    printf("The sizes aren't right\n");
+  if(key.len != 16 && key.len != 24 && key.len !=32) {
+    printf("Invalid key length\n");
     return 1;
   }
-
-
-  /*printf("key = ");
-  for(int i=0; i<key.len; i++) {
-    printf("%x ", key.arr[i]);
+  if(in.len%16 != 0) {
+    printf("Incorrect message length\n");
+    return 2;
   }
-  printf("\niv = ");
-  for(int i=0; i<ctr->len; i++) {
-    printf("%x ", ctr->arr[i]);
+  if(ctr->len != 16) {
+    printf("Incorrect IV length\n");
+    return 3;
   }
-  printf("\n");*/
 
   out->len = in.len;
   out->arr = malloc(out->len);
   keys k = expand_key(key);
   for(uint32_t i=0; i<in.len/16; i++) {
-    //printf("loop\n");
     state_matrix ctr_sm = byteArray_to_stateMatrix(*ctr);
     state_matrix aes_out_sm = __aes__(ctr_sm, k);
     byte_array_t aes_out = stateMatrix_to_byteArray(aes_out_sm);

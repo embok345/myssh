@@ -10,6 +10,53 @@ typedef struct sha_256_blocks_t {
   uint32_t **blocks;
 } sha_256_blocks_t;
 
+void hmac(const byte_array_t data, const byte_array_t key,
+          void (*hash)(const byte_array_t, byte_array_t *),
+          uint8_t hash_block_size,
+          byte_array_t *output) {
+
+  byte_array_t ipad, opad;
+  ipad.len = key.len;
+  opad.len = key.len;
+  ipad.arr = malloc(ipad.len);
+  opad.arr = malloc(opad.len);
+  memcpy(ipad.arr, key.arr, ipad.len);
+  memcpy(opad.arr, key.arr, opad.len);
+  if(key.len < hash_block_size) {
+    ipad.len = hash_block_size;
+    opad.len = hash_block_size;
+    ipad.arr = realloc(ipad.arr, ipad.len);
+    opad.arr = realloc(opad.arr, opad.len);
+    for(int i=key.len; i<hash_block_size; i++) {
+      ipad.arr[i] = 0;
+      opad.arr[i] = 0;
+    }
+  } else if(key.len > hash_block_size) {
+    printf("This shouldn't be reached\n");
+    return;
+  }
+
+  for(int i=0; i<ipad.len; i++) {
+    ipad.arr[i] ^= 0x36;
+    opad.arr[i] ^= 0x5c;
+  }
+
+  ipad.len += data.len;
+  ipad.arr = realloc(ipad.arr, ipad.len);
+  memcpy(ipad.arr + ipad.len - data.len, data.arr, data.len);
+  byte_array_t temp;
+  hash(ipad, &temp);
+  opad.len += temp.len;
+  opad.arr = realloc(opad.arr, opad.len);
+  memcpy(opad.arr + opad.len - temp.len, temp.arr, temp.len);
+  hash(opad, output);
+
+  free(ipad.arr);
+  free(opad.arr);
+  free(temp.arr);
+}
+
+
 void long_into_bytes(uint64_t in, uint8_t* out) {
   out[0] = (in>>56)%256;
   out[1] = (in>>48)%256;

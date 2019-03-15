@@ -22,33 +22,59 @@ int main() {
 
   connect(sock, (struct sockaddr *)&dest, sizeof(struct sockaddr_in));
 
-  bignum *K;
-  byte_array_t exchange_hash;
+  connection con;
+  con.socket = sock;
+  con.enc_c2s = NULL;
+  con.enc_s2c = NULL;
+  con.mac_c2s = NULL;
+  con.mac_s2c = NULL;
+  con.sequence_number = 0;
 
-  start_connection(sock);
+  if(start_connection(&con) == 1)
+    return 1;
+
 
   printf("%s%s", I_C, I_S);
 
-  connection con;
-  con.socket = sock;
-  con.encryption_block_size = 0;
-  con.mac_block_size = 0;
-  con.sequence_number = 0;
+  bignum *K;
+  byte_array_t exchange_hash;
 
   kex_init(&con, &K, &exchange_hash);
 
   con.session_id = exchange_hash;
-  con.encryption_block_size = 16;
-  con.mac_block_size = 64;
-  con.mac_output_size = 32;
+  //con.encryption_block_size = 16;
+  //con.mac_block_size = 64;
+  //con.mac_output_size = 32;
+  con.enc_c2s = malloc(sizeof(enc_struct));
+  con.enc_c2s->enc = aes_ctr;
+  con.enc_c2s->dec = aes_ctr;
+  con.enc_c2s->block_size=16;
+  con.enc_c2s->key_size=32;
+  con.enc_s2c = malloc(sizeof(enc_struct));
+  con.enc_s2c->enc = aes_ctr;
+  con.enc_s2c->dec = aes_ctr;
+  con.enc_s2c->block_size=16;
+  con.enc_s2c->key_size=32;
+  con.mac_c2s = malloc(sizeof(mac_struct));
+  con.mac_c2s->hash = sha_256;
+  con.mac_c2s->mac = hmac;
+  con.mac_c2s->hash_block_size = 64;
+  con.mac_c2s->mac_output_size = 32;
+  con.mac_s2c = malloc(sizeof(mac_struct));
+  con.mac_s2c->hash = sha_256;
+  con.mac_s2c->mac = hmac;
+  con.mac_s2c->hash_block_size = 64;
+  con.mac_s2c->mac_output_size = 32;
   derive_keys(K, exchange_hash, &con);
+
+  printf("Derived keys\n");
 
   bn_nuke(&K);
 
   pthread_t tid;
-  pthread_create(&tid, NULL, listener_thread, (void *)&sock);
+  pthread_create(&tid, NULL, listener_thread, (void *)&con);
 
-  uint8_t *msg = "ssh-connection";
+  uint8_t *msg = "ssh-userauth";
   byte_array_t service_request_message;
   service_request_message.len = strlen(msg) + 5;
   service_request_message.arr = malloc(service_request_message.len);
@@ -57,7 +83,7 @@ int main() {
   memcpy(service_request_message.arr + 5, msg, strlen(msg));
   packet service_request_pak = build_packet(service_request_message, &con);
   send_packet(service_request_pak, &con);
-
+/*
   byte_array_t *user_auth_response_bytes;
   pthread_join(tid, (void **)&user_auth_response_bytes);
 
@@ -65,7 +91,8 @@ int main() {
   for(int i=0; i<user_auth_response_bytes->len; i++) {
     printf("%x ", user_auth_response_bytes->arr[i]);
   }
-  byte_array_t decrypted_response;
+  printf("\n");
+  /*byte_array_t decrypted_response;
   aes_ctr(*user_auth_response_bytes, con.key_s2c, &con.iv_s2c, &decrypted_response);
   printf("\ndecrypted response?: ");
   for(int i=0; i<decrypted_response.len; i++) {
@@ -75,6 +102,8 @@ int main() {
 
 
   free(exchange_hash.arr);
+
+ */
 
   free(I_C);
   free(I_S);
@@ -95,79 +124,173 @@ void derive_keys(const bignum *K, const byte_array_t H, connection *c) {
   memcpy(prehash.arr+offset+H.len+1, c->session_id.arr, c->session_id.len);
 
   (prehash.arr+offset+H.len)[0] = 65;
+  sha_256(prehash, &(c->enc_c2s->iv));
+  c->enc_c2s->iv.len = 16; //TODO should be c->enc_c2s->block_size
+  //sha_256(prehash, &(c->iv_c2s));
+  //c->iv_c2s.len = c->encryption_block_size;
 
-  sha_256(prehash, &(c->iv_c2s));
-  c->iv_c2s.len = 16;
+  for(int i=0; i<c->enc_c2s->iv.len; i++) {
+    printf("%x ", c->enc_c2s->iv.arr[i]);
+  }
+  printf("\n");
 
   (prehash.arr+offset+H.len)[0] = 66;
-  sha_256(prehash, &(c->iv_s2c));
-  c->iv_s2c.len = 16;
+  sha_256(prehash, &(c->enc_s2c->iv));
+  c->enc_s2c->iv.len = 16;//TODO as above
+
+  for(int i=0; i<c->enc_s2c->iv.len; i++) {
+    printf("%x ", c->enc_s2c->iv.arr[i]);
+  }
+  printf("\n");
 
   (prehash.arr+offset+H.len)[0] = 67;
-  sha_256(prehash, &(c->key_c2s));
+  //sha_256(prehash, &(c->key_c2s));
+  sha_256(prehash, &(c->enc_c2s->key));
+
+  for(int i=0; i<c->enc_c2s->key.len; i++) {
+    printf("%x ", c->enc_c2s->key.arr[i]);
+  }
+  printf("\n");
+
 
   (prehash.arr+offset+H.len)[0] = 68;
-  sha_256(prehash, &(c->key_s2c));
+  //sha_256(prehash, &(c->key_s2c));
+  sha_256(prehash, &(c->enc_s2c->key));
 
-  (prehash.arr+offset+H.len)[0] = 69;//hmac requires 64 byte keys, this
-  sha_256(prehash, &(c->mac_c2s)); //only gives 32 bytes. Should we pad with
-                                   //0's, as in hmac spec, or do subsequent
-                                   //hash's as in ssh spec?
+  for(int i=0; i<c->enc_s2c->key.len; i++) {
+    printf("%x ", c->enc_s2c->key.arr[i]);
+  }
+  printf("\n");
+
+  (prehash.arr+offset+H.len)[0] = 69;
+  //sha_256(prehash, &(c->mac_c2s));
+  sha_256(prehash, &(c->mac_c2s->key));
+
+  for(int i=0; i<c->mac_c2s->key.len; i++) {
+    printf("%x ", c->mac_c2s->key.arr[i]);
+  }
+  printf("\n");
 
   (prehash.arr+offset+H.len)[0] = 70;
-  sha_256(prehash, &(c->mac_s2c));
+  //sha_256(prehash, &(c->mac_s2c));
+  sha_256(prehash, &(c->mac_s2c->key));
+
+  for(int i=0; i<c->mac_s2c->key.len; i++) {
+    printf("%x ", c->mac_s2c->key.arr[i]);
+  }
+  printf("\n");
 
 }
 
 void *listener_thread(void *arg) {
-  uint8_t *output = malloc(35000);
-  int sock = *((int *)arg);
-  int len = recv(sock, output, 35000, 0);
-  output = realloc(output, len);
-  byte_array_t *arr = malloc(sizeof(byte_array_t));
-  arr->len = len;
-  arr->arr = output;
-  return (void *)arr;
+  connection *c = (connection *)arg;
+
+  uint32_t first_length;
+  if(!c->enc_s2c)
+    first_length = 4;
+  else
+    first_length = c->enc_s2c->block_size;
+
+  byte_array_t first_block;
+  first_block.len = first_length;
+  first_block.arr = malloc(first_block.len);
+  recv(c->socket, first_block.arr, first_block.len, 0);
+
+  byte_array_t temp, *output;
+  output = malloc(sizeof(byte_array_t));
+  //if(c->encryption_block_size != 0) {
+  if(c->enc_s2c) {
+    //aes_ctr(first_block, c->key_s2c, &(c->iv_s2c), &temp);
+    c->enc_s2c->dec(first_block, c->enc_s2c->key, &(c->enc_s2c->iv), &temp);
+    output->len = temp.len;
+    output->arr = malloc(output->len);
+    memcpy(output->arr, temp.arr, output->len);
+    free(temp.arr);
+  } else {
+    output->len = first_block.len;
+    output->arr = malloc(output->len);
+    memcpy(output->arr, first_block.arr, output->len);
+  }
+
+  int to_receive = bytes_to_int(output->arr) + 4 - first_length;
+  if(to_receive >= 35000) {
+    printf("Invalid message length\n");
+    return NULL;
+  }
+
+  byte_array_t next_blocks;
+  next_blocks.len = to_receive;
+  next_blocks.arr = malloc(to_receive);
+  recv(c->socket, next_blocks.arr, to_receive, 0);
+
+  //if(c->encryption_block_size != 0) {
+  if(c->enc_s2c) {
+    //aes_ctr(next_blocks, c->key_s2c, &(c->iv_s2c), &temp);
+    c->enc_s2c->dec(next_blocks, c->enc_s2c->key,
+        &(c->enc_s2c->iv), &temp);
+    output->len += temp.len;
+    output->arr = realloc(output->arr, output->len);
+    memcpy(output->arr + first_block.len, temp.arr,
+        output->len - first_block.len);
+    free(next_blocks.arr);
+    free(temp.arr);
+  } else {
+    output->len += next_blocks.len;
+    output->arr = realloc(output->arr, output->len);
+    memcpy(output->arr + first_block.len, next_blocks.arr,
+        output->len - first_block.len);
+    free(next_blocks.arr);
+  }
+
+  //if(c->mac_block_size != 0) {
+  if(c->mac_s2c) {
+    output->len += c->mac_s2c->mac_output_size;
+    output->arr = realloc(output->arr, output->len);
+    recv(c->socket, output->arr + output->len - c->mac_s2c->mac_output_size,
+        c->mac_s2c->mac_output_size, 0);
+    //TODO we should check if the mac is the same
+  }
+
+  return (void *)output;
+
 }
 
-void start_connection(int sock) {
-  pthread_t tid;
-  pthread_create(&tid, NULL, listener_thread, (void *)&sock);
+int start_connection(connection *c) {
 
   int I_C_len = strlen(VERSION) + 11;
   I_C = malloc(I_C_len);
   snprintf(I_C, I_C_len, "SSH-2.0-%s\r\n", VERSION);
-  send(sock, I_C, I_C_len - 1, 0);
+  send(c->socket, I_C, I_C_len - 1, 0);
 
-  byte_array_t *identification_s_string;
-  pthread_join(tid, (void **)&identification_s_string);
-  while(identification_s_string->len < 4 ||
-      memcmp(identification_s_string->arr, "SSH-", 3)!=0) {
-    free(identification_s_string->arr);
-    free(identification_s_string);
-    pthread_create(&tid, NULL, listener_thread, (void *)&sock);
-    pthread_join(tid, (void **)&identification_s_string);
+  byte_array_t identification_s_string;
+  identification_s_string.arr = malloc(200);
+  identification_s_string.len = recv(c->socket, identification_s_string.arr, 200, 0);
+
+  while(identification_s_string.len < 4 ||
+      memcmp(identification_s_string.arr, "SSH-", 3)!=0) {
+    identification_s_string.len = recv(c->socket, identification_s_string.arr, 200, 0);
   }
 
   //remote_constr now starts with "SSH-"
-  if(identification_s_string->len<8 ||
-      memcmp(identification_s_string->arr+4, "2.0-", 4)!=0) {
+  if(identification_s_string.len<8 ||
+      memcmp(identification_s_string.arr+4, "2.0-", 4)!=0) {
     printf("Invalid protocol\n");
-    free(identification_s_string->arr);
-    free(identification_s_string);
-    return;
+    free(identification_s_string.arr);
+    return 1;
   }
-  I_S = malloc(identification_s_string->len + 1);
-  memcpy(I_S, identification_s_string->arr, identification_s_string->len);
-  I_S[identification_s_string->len] = '\0';
 
-  free(identification_s_string->arr);
-  free(identification_s_string);
+  I_S = malloc(identification_s_string.len + 1);
+  memcpy(I_S, identification_s_string.arr, identification_s_string.len);
+  I_S[identification_s_string.len] = '\0';
+
+  free(identification_s_string.arr);
+
+  return 0;
 }
 
 void kex_init(connection *c, bignum **K, byte_array_t *exchange_hash) {
   pthread_t tid;
-  pthread_create(&tid, NULL, listener_thread, (void *)&(c->socket));
+  pthread_create(&tid, NULL, listener_thread, (void *)c);
 
   packet kex_init_c_pak = build_kex_init(c);
   send_packet(kex_init_c_pak, c);
@@ -209,7 +332,7 @@ void kex_init(connection *c, bignum **K, byte_array_t *exchange_hash) {
   send_packet(kex_dh_init_pak, c);
   free_pak(&kex_dh_init_pak);
 
-  pthread_create(&tid, NULL, listener_thread, (void *)&(c->socket));
+  pthread_create(&tid, NULL, listener_thread, (void *)c);
   byte_array_t *kex_dh_reply_bytes;
   pthread_join(tid, (void **)&kex_dh_reply_bytes);
   packet kex_dh_reply_pak = bytes_to_packet(kex_dh_reply_bytes->arr,
@@ -323,15 +446,24 @@ void kex_init(connection *c, bignum **K, byte_array_t *exchange_hash) {
 
     free(sig);
 
+    pthread_create(&tid, NULL, listener_thread, (void *)c);
+
     uint8_t new_keys_bytes[] = {SSH_MSG_NEWKEYS};
     byte_array_t new_keys = {1, new_keys_bytes};
     packet new_keys_pak = build_packet(new_keys, c);
     send_packet(new_keys_pak, c);
     free_pak(&new_keys_pak);
 
+    byte_array_t *kex_new_keys_bytes;
+    pthread_join(tid, (void **)&kex_new_keys_bytes);
+    packet kex_new_keys_pak = bytes_to_packet(kex_new_keys_bytes->arr, kex_new_keys_bytes->len);
+    for(int i=0; i<kex_new_keys_pak.packet_length - kex_new_keys_pak.padding_length - 1; i++) {
+      printf("%"PRIu8" ", kex_new_keys_pak.payload[i]);
+    }
+    printf("\n");
+
     printf("kex completed\n\n");
   }
 
   free_pak(&kex_dh_reply_pak);
 }
-

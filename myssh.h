@@ -22,20 +22,35 @@ typedef struct byte_array_t {
   uint8_t *arr;
 } byte_array_t;
 
-typedef struct connection {
-  //struct sockaddr_in socket;
-  int socket;
-  uint8_t encryption_block_size; //0 if no encryption
-  uint8_t mac_block_size; //0 if no mac
+typedef struct mac_struct {
+  void (*hash)(const byte_array_t, byte_array_t *);
+  void (*mac)(const byte_array_t, const byte_array_t,
+      void (*)(const byte_array_t, byte_array_t *),
+      uint8_t, byte_array_t *);
+  byte_array_t key;
+  uint8_t hash_block_size;
   uint8_t mac_output_size;
+} mac_struct;
+
+typedef struct enc_struct {
+  int (*enc)(const byte_array_t, const byte_array_t,
+      byte_array_t *, byte_array_t *);
+  int (*dec)(const byte_array_t, const byte_array_t,
+      byte_array_t *, byte_array_t *);
+  byte_array_t key;
+  byte_array_t iv;
+  uint8_t block_size;
+  uint8_t key_size;
+} enc_struct;
+
+typedef struct connection {
+  int socket;
   uint32_t sequence_number;
   byte_array_t session_id;
-  byte_array_t iv_c2s;
-  byte_array_t iv_s2c;
-  byte_array_t key_c2s;
-  byte_array_t key_s2c;
-  byte_array_t mac_c2s;
-  byte_array_t mac_s2c;
+  mac_struct *mac_c2s;
+  mac_struct *mac_s2c;
+  enc_struct *enc_c2s;
+  enc_struct *enc_s2c;
 } connection;
 
 typedef struct packet {
@@ -48,7 +63,7 @@ typedef struct packet {
 
 
 /*main*/
-void start_connection(int);
+int start_connection(connection *);
 void kex_init(connection *, bignum **, byte_array_t *);
 void *listener_thread(void *);
 
@@ -74,6 +89,9 @@ int send_packet(packet, connection *);
 
 /*sha*/
 void sha_256(byte_array_t, byte_array_t *);
+void hmac(const byte_array_t, const byte_array_t,
+    void (*)(const byte_array_t, byte_array_t *),
+    uint8_t, byte_array_t *);
 
 /*aes*/
 int aes_ctr(const byte_array_t, const byte_array_t, byte_array_t *, byte_array_t *);

@@ -41,9 +41,11 @@ void packet_to_bytes(packet p, connection *c, byte_array_t *bytes) {
   memcpy(to_encrypt.arr + 5 + p.packet_length - p.padding_length - 1,
          p.padding, p.padding_length);
 
-  if(c->encryption_block_size>0) {
-    int success = aes_ctr(to_encrypt, c->key_c2s, &(c->iv_c2s), bytes);
-    if(success != 0) printf("Encryption failed\n");
+  if(c->enc_c2s) {
+    //int success = aes_ctr(to_encrypt, c->enc_c2s->key, &(c->enciv_c2s), bytes);
+    if(c->enc_c2s->enc(to_encrypt, c->enc_c2s->key, &(c->enc_c2s->iv), bytes)
+        != 0)
+      printf("Encryption failed!\n");
   } else {
     bytes->len = to_encrypt.len;
     bytes->arr = malloc(bytes->len);
@@ -51,7 +53,12 @@ void packet_to_bytes(packet p, connection *c, byte_array_t *bytes) {
   }
   free(to_encrypt.arr);
 
-  if(c->mac_block_size > 0) {
+  if(c->mac_c2s) {
+    printf("mac = ");
+    for(int i=0; i<p.mac.len; i++) {
+      printf("%x ", p.mac.arr[i]);
+    }
+    printf("\n");
     bytes->len += p.mac.len;
     bytes->arr = realloc(bytes->arr, bytes->len);
     memcpy(bytes->arr + bytes->len - p.mac.len, p.mac.arr, p.mac.len);

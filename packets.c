@@ -47,16 +47,13 @@ packet build_kex_init(connection *c) {
 
 int send_packet(packet p, connection *c) {
   byte_array_t bytes;
-  byte_array_t iv_copy;
-  iv_copy.len = c->iv_c2s.len;
-  iv_copy.arr = malloc(iv_copy.len);
-  memcpy(iv_copy.arr, c->iv_c2s.arr, iv_copy.len);
   packet_to_bytes(p, c, &bytes);
   send(c->socket, bytes.arr, bytes.len, 0);
   c->sequence_number++;
   free(bytes.arr);
 }
 
+/*
 void make_mac(packet *p, connection *c) {
   byte_array_t ipad, opad;
   ipad.len = c->mac_c2s.len;
@@ -109,12 +106,19 @@ void make_mac(packet *p, connection *c) {
   free(opad.arr);
   free(ipad.arr);
   free(to_mac.arr);
-}
+}*/
 
 packet build_packet(const byte_array_t in, connection *c) {
   packet p;
 
-  uint32_t block_size = (c->encryption_block_size<8) ? 8 : c->encryption_block_size;
+  uint8_t block_size;
+  if(c->enc_c2s)
+    block_size = c->enc_c2s->block_size;
+  else
+    block_size = 8;
+
+  //uint32_t block_size =
+  //  (c->encryption_block_size<8) ? 8 : c->encryption_block_size;
 
   p.padding_length = block_size - ((in.len + 5)%block_size);
   if(p.padding_length<4)
@@ -130,11 +134,20 @@ packet build_packet(const byte_array_t in, connection *c) {
   p.payload = malloc(in.len);
   memcpy(p.payload, in.arr, in.len);
 
-  if(c->mac_block_size == 0) {
+  if(c->mac_c2s) {
+    byte_array_t to_mac;
+    to_mac.len = p.packet_length + 4;
+    to_mac.arr = malloc(to_mac.len);
+    int_to_bytes(p.packet_length, to_mac.arr);
+    to_mac.arr[4] = p.padding_length;
+    memcpy(to_mac.arr+5, p.payload, p.packet_length - p.padding_length - 1);
+    memcpy(to_mac.arr+to_mac.len-p.padding_length, p.padding, p.padding_length);
+    c->mac_c2s->mac(to_mac, c->mac_c2s->key, c->mac_c2s->hash,
+        c->mac_c2s->hash_block_size, &p.mac);
+    free(to_mac.arr);
+  } else {
     p.mac.len = 0;
     p.mac.arr = NULL;
-  } else {
-    make_mac(&p, c);
   }
 
   return p;
