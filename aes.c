@@ -51,8 +51,7 @@ typedef struct state_matrix {
 
 typedef struct keys {
   uint8_t key_size; //=16, 24, or 32
-  //uint32_t w[4*(NO_ROUNDS+1)];
-  uint32_t *w; //
+  uint32_t *w;
 } keys;
 
 void print_sm(state_matrix s) {
@@ -72,12 +71,6 @@ state_matrix zero_matrix() {
     }
   }
 }
-/*keys zero_keys() {
-  keys k;
-  for(int i=0; i<4*(NO_ROUNDS+1); i++) {
-    k.w[i] = 0;
-  }
-}*/
 
 state_matrix add_round_key(state_matrix in, uint32_t keys[4]) {
   //printf("%x, %x, %x, %x\n", keys[0], keys[1], keys[2], keys[3]);
@@ -374,8 +367,12 @@ int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t *ctr, by
     for(uint32_t j=0; j<aes_out.len; j++) {
       out->arr[16*i + j] = in.arr[16*i + j] ^ aes_out.arr[j];
     }
+    free(aes_out.arr);
     increment_byte_array(ctr);
   }
+
+  free(k.w);
+
   return 0;
 }
 /*

@@ -41,6 +41,7 @@ int main() {
 
   kex_init(&con, &K, &exchange_hash);
 
+  //TODO move this into kex
   con.session_id = exchange_hash;
   con.enc_c2s = malloc(sizeof(enc_struct));
   con.enc_c2s->enc = aes_ctr;
@@ -79,6 +80,9 @@ int main() {
   packet service_request_pak = build_packet(service_request_message, &con);
   send_packet(service_request_pak, &con);
 
+  free_pak(&service_request_pak);
+  free(service_request_message.arr);
+
   byte_array_t *user_auth_response_bytes;
   pthread_join(tid, (void **)&user_auth_response_bytes);
 
@@ -87,8 +91,21 @@ int main() {
     printf("%x ", user_auth_response_bytes->arr[i]);
   }
   printf("\n");
+  free(user_auth_response_bytes->arr);
+  free(user_auth_response_bytes);
+
 
   free(exchange_hash.arr);
+  free(con.enc_c2s->key.arr);
+  free(con.enc_c2s->iv.arr);
+  free(con.enc_s2c->key.arr);
+  free(con.enc_s2c->iv.arr);
+  free(con.mac_s2c->key.arr);
+  free(con.mac_c2s->key.arr);
+  free(con.enc_c2s);
+  free(con.enc_s2c);
+  free(con.mac_c2s);
+  free(con.mac_s2c);
 
   free(I_C);
   free(I_S);
@@ -130,6 +147,8 @@ void derive_keys(const bignum *K, const byte_array_t H, connection *c) {
 
   (prehash.arr+offset+H.len)[0] = 70;
   sha_256(prehash, &(c->mac_s2c->key));
+
+  free(prehash.arr);
 }
 
 void *listener_thread(void *arg) {
@@ -148,9 +167,7 @@ void *listener_thread(void *arg) {
 
   byte_array_t temp, *output;
   output = malloc(sizeof(byte_array_t));
-  //if(c->encryption_block_size != 0) {
   if(c->enc_s2c) {
-    //aes_ctr(first_block, c->key_s2c, &(c->iv_s2c), &temp);
     c->enc_s2c->dec(first_block, c->enc_s2c->key, &(c->enc_s2c->iv), &temp);
     output->len = temp.len;
     output->arr = malloc(output->len);
@@ -161,6 +178,7 @@ void *listener_thread(void *arg) {
     output->arr = malloc(output->len);
     memcpy(output->arr, first_block.arr, output->len);
   }
+  free(first_block.arr);
 
   int to_receive = bytes_to_int(output->arr) + 4 - first_length;
   if(to_receive >= 35000) {
@@ -182,17 +200,15 @@ void *listener_thread(void *arg) {
     output->arr = realloc(output->arr, output->len);
     memcpy(output->arr + first_block.len, temp.arr,
         output->len - first_block.len);
-    free(next_blocks.arr);
     free(temp.arr);
   } else {
     output->len += next_blocks.len;
     output->arr = realloc(output->arr, output->len);
     memcpy(output->arr + first_block.len, next_blocks.arr,
         output->len - first_block.len);
-    free(next_blocks.arr);
   }
+  free(next_blocks.arr);
 
-  //if(c->mac_block_size != 0) {
   if(c->mac_s2c) {
     output->len += c->mac_s2c->mac_output_size;
     output->arr = realloc(output->arr, output->len);
@@ -411,6 +427,9 @@ void kex_init(connection *c, bignum **K, byte_array_t *exchange_hash) {
       printf("%"PRIu8" ", kex_new_keys_pak.payload[i]);
     }
     printf("\n");
+    free_pak(&kex_new_keys_pak);
+    free(kex_new_keys_bytes->arr);
+    free(kex_new_keys_bytes);
 
     printf("kex completed\n\n");
   }
