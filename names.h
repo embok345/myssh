@@ -1,18 +1,23 @@
-const char *VERSION = "myssh_0.1.1";
+#ifndef MYSSH_NAMES_H
+#define MYSSH_NAMES_H
 
-const char *NONE = "none";
+extern const char *VERSION;
 
-const uint32_t NO_KEX_ALGOS = 1;
-const char *KEX_ALGOS[] = {"diffie-hellman-group14-sha256"};
+extern const char *NONE;
 
-const uint32_t NO_KEY_ALGOS = 1;
-const char *KEY_ALGOS[] = {"ssh-rsa"};
+extern const uint32_t NO_KEX_ALGOS;
+extern const char *KEX_ALGOS[];
 
-const uint32_t NO_ENC_ALGOS = 1;
-const char *ENC_ALGOS[] = {"aes256-ctr"};
+extern const uint32_t NO_KEY_ALGOS;
+extern const char *KEY_ALGOS[];
 
-const uint32_t NO_MAC_ALGOS = 1;
-const char *MAC_ALGOS[] = {"hmac-sha1"};
+extern const uint32_t NO_ENC_ALGOS;
+extern const char *ENC_ALGOS[];
 
-const uint32_t NO_COM_ALGOS = 1;
-const char *COM_ALGOS[] = {"none"};
+extern const uint32_t NO_MAC_ALGOS;
+extern const char *MAC_ALGOS[];
+
+extern const uint32_t NO_COM_ALGOS;
+extern const char *COM_ALGOS[];
+
+#endif

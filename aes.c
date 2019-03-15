@@ -3,9 +3,10 @@
 #include <stdlib.h>
 #include <time.h>
 #include <math.h>
+#include "myssh.h"
 
-#define KEY_SIZE 8
-#define NO_ROUNDS (KEY_SIZE+6)
+#define KEY_SIZE 32
+#define NO_ROUNDS ((KEY_SIZE/4)+6)
 
 const uint32_t RCON[11] = {0, 1<<24, 2<<24, 4<<24, 8<<24, 0x10<<24, 0x20<<24, 0x40<<24, 0x80<<24, 0x1B<<24, 0x36<<24};
 
@@ -51,6 +52,15 @@ typedef struct state_matrix {
 typedef struct keys {
   uint32_t w[4*(NO_ROUNDS+1)];
 } keys;
+
+void print_sm(state_matrix s) {
+  for(int i=0; i<4; i++) {
+    for(int j=0; j<4; j++) {
+      printf("%x ", s.m[i][j]);
+    }
+    printf("\n");
+  }
+}
 
 state_matrix zero_matrix() {
   state_matrix m;
@@ -211,35 +221,38 @@ uint32_t rot_word(uint32_t in) {
   return out;
 }
 
-keys expand_key(uint32_t k[KEY_SIZE]) {
+keys expand_key(const byte_array_t k) {
   keys ks = zero_keys();
   uint32_t temp;
   int i=0;
-  while(i<KEY_SIZE) {
-    ks.w[i] = k[i];
-    //printf("w[%d] = %x\n", i, ks.w[i]);
+  while(i<KEY_SIZE/4) {
+    //ks.w[i] = k[i];
+    ks.w[i] = 0;
+    //ks.w[i] = (((uint32_t)k.arr[4*i])<<24) + (((uint32_t)k.arr[4*i+1])<<16) + (((uint32_t)k.arr[4*i+2])<<8) + (uint32_t)k.arr[4*i+3];
+    for(int j=0; j<4; j++) {
+      ks.w[i] <<= 8;
+      if(4*i + j < k.len)
+        ks.w[i] += (uint32_t)k.arr[4*i+j];
+    }
     i++;
   }
 
   while(i<4*(NO_ROUNDS+1)) {
-    //printf("%d\n", i);
     temp = ks.w[i-1];
-    //printf("temp = %x\n", temp);
-    if(i%KEY_SIZE == 0) {
-      //temp = sub_word(rot_word(temp)) ^ RCON[i/KEY_SIZE];
+    if(i%(KEY_SIZE/4) == 0) {
       temp = rot_word(temp);
       //printf("after rot_word = %x\n", temp);
       temp = sub_word(temp);
       //printf("after sub_word = %x\n", temp);
       //printf("rcon = %x\n", RCON[i/KEY_SIZE]);
-      temp ^= RCON[i/KEY_SIZE];
+      temp ^= RCON[i/(KEY_SIZE/4)];
       //printf("after xor with rcon = %x\n", temp);
-    } else if(KEY_SIZE > 6 && (i%KEY_SIZE == 4)) {
+    } else if((KEY_SIZE/4) > 6 && (i%(KEY_SIZE/4) == 4)) {
       temp = sub_word(temp);
       //printf("after sub_word = %x\n", temp);
     }
     //printf("w[i-Nk] = %x\n", ks.w[i-KEY_SIZE]);
-    ks.w[i] = ks.w[i-KEY_SIZE] ^ temp;
+    ks.w[i] = ks.w[i-(KEY_SIZE/4)] ^ temp;
     //printf("w[i] = %x\n", ks.w[i]);
     i++;
     //printf("\n");
@@ -248,40 +261,34 @@ keys expand_key(uint32_t k[KEY_SIZE]) {
   return ks;
 }
 
-
-void print_matrix(state_matrix in) {
- for(int i=0; i<4; i++) {
-    for(int j=0; j<4; j++) {
-      printf("%x ", in.m[i][j]);
-    }
-    printf("\n");
-  }
-}
-
-void print_matrix_linear(state_matrix in) {
-  for(int i=0; i<4; i++) {
-    for(int j=0; j<4; j++) {
-      printf("%x", in.m[j][i]);
-    }
-  }
-  printf("\n");
-}
-
-state_matrix aes(state_matrix in, keys k) {
+state_matrix __aes__(state_matrix in, keys k) {
   state_matrix state = in;
+
+  //printf("input:\n");print_sm(state);printf("\n");
 
   uint32_t roundKeys[4] = {k.w[0], k.w[1], k.w[2], k.w[3]};
   state = add_round_key(state, roundKeys);
 
   for(int round = 1; round<NO_ROUNDS; round++) {
+    //printf("start of round %d:\n", round);
+    //print_sm(state);printf("\n");
     state = sub_bytes(state);
+    //printf("After subbytes:\n");
+    //print_sm(state);printf("\n");
     state = shift_rows(state);
+    //printf("After shiftrows:\n");
+    //print_sm(state);printf("\n");
     state = mix_columns(state);
+    //printf("After mixbytes:\n");
+    //print_sm(state);printf("\n");
     roundKeys[0] = k.w[round*4];
     roundKeys[1] = k.w[round*4 + 1];
     roundKeys[2] = k.w[round*4 + 2];
     roundKeys[3] = k.w[round*4 + 3];
+    //printf("Round keys:\n");
+    //printf("%x\n%x\n%x\n%x\n", roundKeys[0], roundKeys[1], roundKeys[2], roundKeys[3]);
     state = add_round_key(state, roundKeys);
+    //printf("\n");
   }
 
   state = sub_bytes(state);
@@ -292,10 +299,14 @@ state_matrix aes(state_matrix in, keys k) {
   roundKeys[3] = k.w[NO_ROUNDS*4 + 3];
   state = add_round_key(state, roundKeys);
 
+  /*printf("Output:\n");
+  print_sm(state);
+  printf("\n");*/
+
   return state;
 }
 
-state_matrix inv_aes(state_matrix in, keys k) {
+state_matrix __inv_aes__(state_matrix in, keys k) {
   state_matrix state = in;
   uint32_t roundKeys[4] = {k.w[NO_ROUNDS*4], k.w[NO_ROUNDS*4+1],
                            k.w[NO_ROUNDS*4+2], k.w[NO_ROUNDS*4+3]};
@@ -322,50 +333,106 @@ state_matrix inv_aes(state_matrix in, keys k) {
   return state;
 }
 
-state_matrix from_byte_array(uint8_t plaintext[16]) {
+state_matrix byteArray_to_stateMatrix(const byte_array_t arr) {
   state_matrix out;
   for(int i=0; i<4; i++) {
     for(int j=0; j<4; j++) {
-      out.m[i][j] = plaintext[4*j+i];
+      if(4*j+i >= arr.len)
+        out.m[i][j] = 0;
+      else
+        out.m[i][j] = arr.arr[4*j+i];
     }
   }
   return out;
 }
-uint8_t* to_byte_array(state_matrix in) {
-  uint8_t *ret = malloc(16);
+byte_array_t stateMatrix_to_byteArray(state_matrix in) {
+  byte_array_t ret;
+  ret.len = 16;
+  ret.arr = malloc(16);
   for(int i=0; i<4; i++) {
     for(int j=0; j<4; j++) {
-      ret[4*j+i] = in.m[i][j];
+      ret.arr[4*j+i] = in.m[i][j];
     }
   }
   return ret;
 }
 
+void increment_byte_array(byte_array_t *in) {
+  uint32_t pos = in->len-1;
+  in->arr[pos] = (in->arr[pos]) + 1;
+  while(in->arr[pos] == 0 && pos>0) {
+    pos--;
+    (in->arr[pos])++;
+  }
+}
+
+int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t *ctr, byte_array_t *out) {
+  if(in.len%16 != 0 || key.len!=KEY_SIZE || ctr->len != 16) {
+    printf("The sizes aren't right\n");
+    return 1;
+  }
+
+
+  /*printf("key = ");
+  for(int i=0; i<key.len; i++) {
+    printf("%x ", key.arr[i]);
+  }
+  printf("\niv = ");
+  for(int i=0; i<ctr->len; i++) {
+    printf("%x ", ctr->arr[i]);
+  }
+  printf("\n");*/
+
+  out->len = in.len;
+  out->arr = malloc(out->len);
+  keys k = expand_key(key);
+  for(uint32_t i=0; i<in.len/16; i++) {
+    //printf("loop\n");
+    state_matrix ctr_sm = byteArray_to_stateMatrix(*ctr);
+    state_matrix aes_out_sm = __aes__(ctr_sm, k);
+    byte_array_t aes_out = stateMatrix_to_byteArray(aes_out_sm);
+    for(uint32_t j=0; j<aes_out.len; j++) {
+      out->arr[16*i + j] = in.arr[16*i + j] ^ aes_out.arr[j];
+    }
+    increment_byte_array(ctr);
+  }
+  return 0;
+}
+
 /*int main() {
   //uint8_t plaintext[16] = {0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x99,
   //                       0xaa,0xbb,0xcc,0xdd,0xee,0xff};
-  uint32_t key[KEY_SIZE] = {0x00010203,0x04050607,0x08090a0b,0x0c0d0e0f,
-                            0x10111213,0x14151617,0x18191a1b,0x1c1d1e1f};
+  //uint8_t key[4*KEY_SIZE] = {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+  //                           0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f};
 
-  srand(time(NULL));
-  uint8_t plaintext[16];
-  for(int i=0; i<16; i++) {
-    plaintext[i] = rand()%256;
-    printf("%x", plaintext[i]);
+  //uint8_t plaintext_b[16] = {0x32,0x43,0xf6,0xa8,0x88,0x5a,0x30,0x8d,0x31,0x31,0x98,0xa2,0xe0,0x37,0x07,0x34};
+  //uint8_t key_b[16] = {0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c};
+
+  byte_array_t key;
+  key.len = KEY_SIZE;
+  key.arr = malloc(key.len);
+  for(int i=0; i<key.len; i++) {
+    key.arr[i] = i;
   }
-  printf("\n");
 
-  state_matrix input = from_byte_array(plaintext);
+  byte_array_t plaintext;
+  plaintext.len = 16;
+  plaintext.arr = malloc(plaintext.len);
+  for(int i=0; i<plaintext.len; i++) {
+    plaintext.arr[i] = i + (i*16);
+  }
+
+  state_matrix input = byteArray_to_stateMatrix(plaintext);
   keys ks = expand_key(key);
-  state_matrix enc = aes(input, ks);
-  uint8_t *enc_text = to_byte_array(enc);
-  for(int i=0; i<16;i++) {
-    printf("%x", enc_text[i]);
+  state_matrix enc = __aes__(input, ks);
+  byte_array_t enc_text = stateMatrix_to_byteArray(enc);
+  for(int i=0; i<enc_text.len; i++) {
+    printf("%x", enc_text.arr[i]);
   }
   printf("\n");
-  uint8_t *dec_text = to_byte_array(inv_aes(enc, ks));
-  for(int i=0; i<16;i++) {
-    printf("%x", dec_text[i]);
+  byte_array_t dec_text = stateMatrix_to_byteArray(__inv_aes__(enc, ks));
+  for(int i=0; i<dec_text.len; i++) {
+    printf("%x", dec_text.arr[i]);
   }
   printf("\n");
 }*/
