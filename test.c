@@ -42,9 +42,6 @@ int main() {
   kex_init(&con, &K, &exchange_hash);
 
   con.session_id = exchange_hash;
-  //con.encryption_block_size = 16;
-  //con.mac_block_size = 64;
-  //con.mac_output_size = 32;
   con.enc_c2s = malloc(sizeof(enc_struct));
   con.enc_c2s->enc = aes_ctr;
   con.enc_c2s->dec = aes_ctr;
@@ -67,8 +64,6 @@ int main() {
   con.mac_s2c->mac_output_size = 32;
   derive_keys(K, exchange_hash, &con);
 
-  printf("Derived keys\n");
-
   bn_nuke(&K);
 
   pthread_t tid;
@@ -83,7 +78,7 @@ int main() {
   memcpy(service_request_message.arr + 5, msg, strlen(msg));
   packet service_request_pak = build_packet(service_request_message, &con);
   send_packet(service_request_pak, &con);
-/*
+
   byte_array_t *user_auth_response_bytes;
   pthread_join(tid, (void **)&user_auth_response_bytes);
 
@@ -92,18 +87,8 @@ int main() {
     printf("%x ", user_auth_response_bytes->arr[i]);
   }
   printf("\n");
-  /*byte_array_t decrypted_response;
-  aes_ctr(*user_auth_response_bytes, con.key_s2c, &con.iv_s2c, &decrypted_response);
-  printf("\ndecrypted response?: ");
-  for(int i=0; i<decrypted_response.len; i++) {
-    printf("%x ", decrypted_response.arr[i]);
-  }
-  printf("\n");
-
 
   free(exchange_hash.arr);
-
- */
 
   free(I_C);
   free(I_S);
@@ -111,6 +96,8 @@ int main() {
 }
 
 void derive_keys(const bignum *K, const byte_array_t H, connection *c) {
+
+  //TODO change to the correct hasing algorithm
 
   uint32_t prehash_len = 4 + bn_trueLength(K) + H.len + c->session_id.len + 1;
   if(bn_getBlock(K, bn_trueLength(K)-1) >= 128) {
@@ -125,61 +112,24 @@ void derive_keys(const bignum *K, const byte_array_t H, connection *c) {
 
   (prehash.arr+offset+H.len)[0] = 65;
   sha_256(prehash, &(c->enc_c2s->iv));
-  c->enc_c2s->iv.len = 16; //TODO should be c->enc_c2s->block_size
-  //sha_256(prehash, &(c->iv_c2s));
-  //c->iv_c2s.len = c->encryption_block_size;
-
-  for(int i=0; i<c->enc_c2s->iv.len; i++) {
-    printf("%x ", c->enc_c2s->iv.arr[i]);
-  }
-  printf("\n");
+  c->enc_c2s->iv.len = c->enc_c2s->block_size;
 
   (prehash.arr+offset+H.len)[0] = 66;
   sha_256(prehash, &(c->enc_s2c->iv));
-  c->enc_s2c->iv.len = 16;//TODO as above
+  c->enc_s2c->iv.len = c->enc_s2c->block_size;
 
-  for(int i=0; i<c->enc_s2c->iv.len; i++) {
-    printf("%x ", c->enc_s2c->iv.arr[i]);
-  }
-  printf("\n");
 
   (prehash.arr+offset+H.len)[0] = 67;
-  //sha_256(prehash, &(c->key_c2s));
   sha_256(prehash, &(c->enc_c2s->key));
 
-  for(int i=0; i<c->enc_c2s->key.len; i++) {
-    printf("%x ", c->enc_c2s->key.arr[i]);
-  }
-  printf("\n");
-
-
   (prehash.arr+offset+H.len)[0] = 68;
-  //sha_256(prehash, &(c->key_s2c));
   sha_256(prehash, &(c->enc_s2c->key));
 
-  for(int i=0; i<c->enc_s2c->key.len; i++) {
-    printf("%x ", c->enc_s2c->key.arr[i]);
-  }
-  printf("\n");
-
   (prehash.arr+offset+H.len)[0] = 69;
-  //sha_256(prehash, &(c->mac_c2s));
   sha_256(prehash, &(c->mac_c2s->key));
 
-  for(int i=0; i<c->mac_c2s->key.len; i++) {
-    printf("%x ", c->mac_c2s->key.arr[i]);
-  }
-  printf("\n");
-
   (prehash.arr+offset+H.len)[0] = 70;
-  //sha_256(prehash, &(c->mac_s2c));
   sha_256(prehash, &(c->mac_s2c->key));
-
-  for(int i=0; i<c->mac_s2c->key.len; i++) {
-    printf("%x ", c->mac_s2c->key.arr[i]);
-  }
-  printf("\n");
-
 }
 
 void *listener_thread(void *arg) {

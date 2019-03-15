@@ -53,61 +53,6 @@ int send_packet(packet p, connection *c) {
   free(bytes.arr);
 }
 
-/*
-void make_mac(packet *p, connection *c) {
-  byte_array_t ipad, opad;
-  ipad.len = c->mac_c2s.len;
-  opad.len = c->mac_c2s.len;
-  ipad.arr = malloc(ipad.len);
-  opad.arr = malloc(opad.len);
-  memcpy(ipad.arr, c->mac_c2s.arr, ipad.len);
-  memcpy(opad.arr, c->mac_c2s.arr, opad.len);
-  if(c->mac_c2s.len < c->mac_block_size) {
-    ipad.len = c->mac_block_size;
-    opad.len = c->mac_block_size;
-    ipad.arr = realloc(ipad.arr, ipad.len);
-    opad.arr = realloc(opad.arr, opad.len);
-    for(int i=c->mac_c2s.len; i<c->mac_block_size; i++) {
-      ipad.arr[i] = 0;
-      opad.arr[i] = 0;
-    }
-  } else if(c->mac_c2s.len > c->mac_block_size) {
-    printf("This shouldn't be reached\n");
-  }
-
-  for(int i=0; i<ipad.len; i++) {
-    ipad.arr[i] ^= 0x36;
-    opad.arr[i] ^= 0x5c;
-  }
-
-  byte_array_t to_mac;
-  to_mac.len = p->packet_length + 8;
-  to_mac.arr = malloc(to_mac.len);
-  int_to_bytes(c->sequence_number, to_mac.arr);
-  int_to_bytes(p->packet_length, to_mac.arr + 4);
-  to_mac.arr[8] = p->padding_length;
-  memcpy(to_mac.arr + 9, p->payload, p->packet_length - p->padding_length - 1);
-  memcpy(to_mac.arr + 9 + p->packet_length - p->padding_length - 1,
-         p->padding, p->padding_length);
-
-  ipad.len += to_mac.len;
-  ipad.arr = realloc(ipad.arr, ipad.len);
-  memcpy(ipad.arr + ipad.len - to_mac.len, to_mac.arr, to_mac.len);
-  sha_256(ipad, &ipad);
-  opad.len += ipad.len;
-  opad.arr = realloc(opad.arr, opad.len);
-  memcpy(opad.arr + opad.len - ipad.len, ipad.arr, ipad.len);
-  sha_256(opad, &opad);
-
-  p->mac.len = opad.len;
-  p->mac.arr = malloc(p->mac.len);
-  memcpy(p->mac.arr, opad.arr, p->mac.len);
-
-  free(opad.arr);
-  free(ipad.arr);
-  free(to_mac.arr);
-}*/
-
 packet build_packet(const byte_array_t in, connection *c) {
   packet p;
 
@@ -116,9 +61,6 @@ packet build_packet(const byte_array_t in, connection *c) {
     block_size = c->enc_c2s->block_size;
   else
     block_size = 8;
-
-  //uint32_t block_size =
-  //  (c->encryption_block_size<8) ? 8 : c->encryption_block_size;
 
   p.padding_length = block_size - ((in.len + 5)%block_size);
   if(p.padding_length<4)
@@ -136,12 +78,13 @@ packet build_packet(const byte_array_t in, connection *c) {
 
   if(c->mac_c2s) {
     byte_array_t to_mac;
-    to_mac.len = p.packet_length + 4;
+    to_mac.len = p.packet_length + 8;
     to_mac.arr = malloc(to_mac.len);
-    int_to_bytes(p.packet_length, to_mac.arr);
-    to_mac.arr[4] = p.padding_length;
-    memcpy(to_mac.arr+5, p.payload, p.packet_length - p.padding_length - 1);
-    memcpy(to_mac.arr+to_mac.len-p.padding_length, p.padding, p.padding_length);
+    int_to_bytes(c->sequence_number, to_mac.arr);
+    int_to_bytes(p.packet_length, to_mac.arr + 4);
+    to_mac.arr[8] = p.padding_length;
+    memcpy(to_mac.arr+9, p.payload, p.packet_length - p.padding_length - 1);
+    memcpy(to_mac.arr+9+p.packet_length-p.padding_length-1, p.padding, p.padding_length);
     c->mac_c2s->mac(to_mac, c->mac_c2s->key, c->mac_c2s->hash,
         c->mac_c2s->hash_block_size, &p.mac);
     free(to_mac.arr);
