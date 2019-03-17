@@ -60,11 +60,11 @@ void packet_to_bytes(packet p, connection *c, byte_array_t *bytes) {
     memcpy(bytes->arr + bytes->len - p.mac.len, p.mac.arr, p.mac.len);
   }
 
-  printf("\nSending bytes: ");
+  /*printf("\nSending bytes: ");
   for(int i=0; i<bytes->len; i++) {
     printf("%x ", bytes->arr[i]);
   }
-  printf("\n");
+  printf("\n");*/
 }
 
 uint32_t bignum_to_mpint(const bignum *in, uint8_t *blocks) {

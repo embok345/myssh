@@ -16,9 +16,9 @@ packet build_kex_init(connection *c) {
   }
   message.len = 17;
 
-  message.len+=build_name_list(NO_KEX_ALGOS, KEX_ALGOS, message.arr+message.len);
+  message.len+=build_name_list(NO_KEX_C_ALGOS, KEX_C_ALGOS, message.arr+message.len);
 
-  message.len+=build_name_list(NO_KEY_ALGOS, KEY_ALGOS, message.arr+message.len);
+  message.len+=build_name_list(NO_KEY_C_ALGOS, KEY_C_ALGOS, message.arr+message.len);
 
   message.len+=build_name_list(NO_ENC_ALGOS, ENC_ALGOS, message.arr+message.len);
   message.len+=build_name_list(NO_ENC_ALGOS, ENC_ALGOS, message.arr+message.len);

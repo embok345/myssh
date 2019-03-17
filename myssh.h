@@ -64,7 +64,7 @@ typedef struct packet {
 
 /*main*/
 int start_connection(connection *);
-void kex_init(connection *, bignum **, byte_array_t *);
+int kex_init(connection *, bignum **, byte_array_t *);
 void *listener_thread(void *);
 
 /*kex*/

@@ -18,7 +18,7 @@ int main() {
   memset(&dest, 0, sizeof(dest));
   dest.sin_family = AF_INET;
   dest.sin_addr.s_addr = inet_addr("142.93.230.76");
-  dest.sin_port = htons(24318);
+  dest.sin_port = htons(24317);
 
   connect(sock, (struct sockaddr *)&dest, sizeof(struct sockaddr_in));
 
@@ -39,7 +39,8 @@ int main() {
   bignum *K;
   byte_array_t exchange_hash;
 
-  kex_init(&con, &K, &exchange_hash);
+  if(kex_init(&con, &K, &exchange_hash) == 1)
+    return 1;
 
   //TODO move this into kex
   con.session_id = exchange_hash;
@@ -86,7 +87,7 @@ int main() {
   byte_array_t *user_auth_response_bytes;
   pthread_join(tid, (void **)&user_auth_response_bytes);
 
-  printf("Received response: ");
+  printf("Received service request response: ");
   for(int i=0; i<user_auth_response_bytes->len; i++) {
     printf("%x ", user_auth_response_bytes->arr[i]);
   }
@@ -237,7 +238,7 @@ int start_connection(connection *c) {
     identification_s_string.len = recv(c->socket, identification_s_string.arr, 200, 0);
   }
 
-  //remote_constr now starts with "SSH-"
+  //now starts with "SSH-"
   if(identification_s_string.len<8 ||
       memcmp(identification_s_string.arr+4, "2.0-", 4)!=0) {
     printf("Invalid protocol\n");
@@ -254,7 +255,56 @@ int start_connection(connection *c) {
   return 0;
 }
 
-void kex_init(connection *c, bignum **K, byte_array_t *exchange_hash) {
+void copy_bytes(const uint8_t *in, uint32_t length, byte_array_t *out) {
+  out->len = length;
+  out->arr = malloc(length);
+  memcpy(out->arr, in, length);
+}
+
+char *get_chosen_algo(uint8_t *arr, uint32_t len,
+                      const char **allowable_algos,
+                      uint32_t no_allowable_algos) {
+
+  if(len == 0) return NULL;
+
+  uint32_t no_s_algos = 1;
+  uint32_t word_start = 0;
+  char **s_algos = malloc(no_s_algos*sizeof(char*));
+  for(int i=0; i<len; i++) {
+    if(arr[i] == ',') {
+      s_algos[no_s_algos-1] = malloc(i-word_start+1);
+      memcpy(s_algos[no_s_algos-1], arr+word_start, i-word_start);
+      s_algos[no_s_algos-1][i-word_start] = '\0';
+      word_start = i+1;
+      s_algos = realloc(s_algos, (++no_s_algos)*sizeof(char*));
+    }
+  }
+  s_algos[no_s_algos-1] = malloc(len-word_start+1);
+  memcpy(s_algos[no_s_algos-1], arr+word_start, len-word_start);
+  s_algos[no_s_algos-1][len - word_start] = '\0';
+
+  char *chosen_algo = NULL;
+
+  for(int i=0; i<no_allowable_algos; i++) {
+    for(int j=0; j<no_s_algos; j++) {
+      if(strcmp(allowable_algos[i], s_algos[j]) == 0) {
+        chosen_algo = malloc(strlen(allowable_algos[i])+1);
+        strcpy(chosen_algo, allowable_algos[i]);
+        break;
+      }
+    }
+    if(chosen_algo) break;
+  }
+
+  for(int i=0; i<no_allowable_algos; i++) {
+    free(s_algos[i]);
+  }
+  free(s_algos);
+
+  return chosen_algo;
+}
+
+int kex_init(connection *c, bignum **K, byte_array_t *exchange_hash) {
   pthread_t tid;
   pthread_create(&tid, NULL, listener_thread, (void *)c);
 
@@ -265,8 +315,84 @@ void kex_init(connection *c, bignum **K, byte_array_t *exchange_hash) {
   pthread_join(tid, (void **)&kex_init_s_bytes);
   packet kex_init_s_pak = bytes_to_packet(kex_init_s_bytes->arr,
       kex_init_s_bytes->len);
+  if(kex_init_s_pak.payload[0]!=SSH_MSG_KEXINIT)
+    return 1;
+    //TODO we probably don't want to return, just wait till we get it right
+
   free(kex_init_s_bytes->arr);
   free(kex_init_s_bytes);
+
+  uint32_t list_offset = 17;
+  uint32_t name_list_len = bytes_to_int(kex_init_s_pak.payload + list_offset);
+  char *chosen_kex_algo =
+      get_chosen_algo(kex_init_s_pak.payload + list_offset + 4,
+      name_list_len, KEX_C_ALGOS, NO_KEX_C_ALGOS);
+  if(!chosen_kex_algo) return 1;
+  list_offset+=name_list_len + 4;
+  printf("Chosen kex algorithm: %s\n", chosen_kex_algo);
+
+  name_list_len = bytes_to_int(kex_init_s_pak.payload + list_offset);
+  char *chosen_key_algo =
+      get_chosen_algo(kex_init_s_pak.payload + list_offset + 4,
+      name_list_len, KEY_C_ALGOS, NO_KEY_C_ALGOS);
+  if(!chosen_key_algo) return 1;
+  list_offset+=name_list_len + 4;
+  printf("Chosen key algorithm: %s\n", chosen_key_algo);
+
+  name_list_len = bytes_to_int(kex_init_s_pak.payload + list_offset);
+  char *chosen_enc_c2s_algo =
+      get_chosen_algo(kex_init_s_pak.payload + list_offset + 4,
+      name_list_len, ENC_ALGOS, NO_ENC_ALGOS);
+  if(!chosen_enc_c2s_algo) return 1;
+  list_offset+=name_list_len + 4;
+  printf("Chosen encryption client to server algorithm: %s\n",
+      chosen_enc_c2s_algo);
+
+  name_list_len = bytes_to_int(kex_init_s_pak.payload + list_offset);
+  char *chosen_enc_s2c_algo =
+      get_chosen_algo(kex_init_s_pak.payload + list_offset + 4,
+      name_list_len, ENC_ALGOS, NO_ENC_ALGOS);
+  if(!chosen_enc_s2c_algo) return 1;
+  list_offset+=name_list_len + 4;
+  printf("Chosen encryption algorithm server to client: %s\n",
+      chosen_enc_s2c_algo);
+
+  name_list_len = bytes_to_int(kex_init_s_pak.payload + list_offset);
+  char *chosen_mac_c2s_algo =
+      get_chosen_algo(kex_init_s_pak.payload + list_offset + 4,
+      name_list_len, MAC_ALGOS, NO_MAC_ALGOS);
+  if(!chosen_mac_c2s_algo) return 1;
+  list_offset+=name_list_len + 4;
+  printf("Chosen mac algorithm client to server: %s\n",
+      chosen_mac_c2s_algo);
+
+  name_list_len = bytes_to_int(kex_init_s_pak.payload + list_offset);
+  char *chosen_mac_s2c_algo =
+      get_chosen_algo(kex_init_s_pak.payload + list_offset + 4,
+      name_list_len, MAC_ALGOS, NO_MAC_ALGOS);
+  if(!chosen_mac_s2c_algo) return 1;
+  list_offset+=name_list_len + 4;
+  printf("Chosen mac algorithm server to client: %s\n",
+      chosen_mac_s2c_algo);
+
+  name_list_len = bytes_to_int(kex_init_s_pak.payload + list_offset);
+  char *chosen_compression_c2s_algo =
+      get_chosen_algo(kex_init_s_pak.payload + list_offset + 4,
+      name_list_len, COM_ALGOS, NO_COM_ALGOS);
+  if(!chosen_compression_c2s_algo) return 1;
+  list_offset+=name_list_len + 4;
+  printf("Chosen compression algorithm client to server: %s\n",
+      chosen_compression_c2s_algo);
+
+  name_list_len = bytes_to_int(kex_init_s_pak.payload + list_offset);
+  char *chosen_compression_s2c_algo =
+      get_chosen_algo(kex_init_s_pak.payload + list_offset + 4,
+      name_list_len, COM_ALGOS, NO_COM_ALGOS);
+  if(!chosen_compression_s2c_algo) return 1;
+  list_offset+=name_list_len + 4;
+  printf("Chosen compression algorithm server to client: %s\n",
+      chosen_compression_s2c_algo);
+
   //TODO We should really check here that the algorithms match up
 
   bignum *p, *g, *x, *e;
@@ -423,16 +549,13 @@ void kex_init(connection *c, bignum **K, byte_array_t *exchange_hash) {
     byte_array_t *kex_new_keys_bytes;
     pthread_join(tid, (void **)&kex_new_keys_bytes);
     packet kex_new_keys_pak = bytes_to_packet(kex_new_keys_bytes->arr, kex_new_keys_bytes->len);
-    for(int i=0; i<kex_new_keys_pak.packet_length - kex_new_keys_pak.padding_length - 1; i++) {
-      printf("%"PRIu8" ", kex_new_keys_pak.payload[i]);
-    }
-    printf("\n");
     free_pak(&kex_new_keys_pak);
     free(kex_new_keys_bytes->arr);
     free(kex_new_keys_bytes);
 
-    printf("kex completed\n\n");
   }
 
   free_pak(&kex_dh_reply_pak);
+
+  return 0;
 }
