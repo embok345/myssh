@@ -5,8 +5,7 @@
 #include <math.h>
 #include "myssh.h"
 
-//#define KEY_SIZE 32
-//#define NO_ROUNDS ((KEY_SIZE/4)+6)
+//TODO comment
 
 const uint32_t RCON[11] = {0, 1<<24, 2<<24, 4<<24, 8<<24, 0x10<<24, 0x20<<24, 0x40<<24, 0x80<<24, 0x1B<<24, 0x36<<24};
 

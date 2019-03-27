@@ -1,48 +1,30 @@
 #include "myssh.h"
 
+//TODO comment
+
 void free_pak(packet *p) {
-  free(p->payload);
+  free(p->payload.arr);
   free(p->padding);
   free(p->mac.arr);
 }
 
-packet build_kex_init(connection *c) {
-  byte_array_t message;
-  message.arr = malloc(2000);
-  //uint8_t *message = malloc(2000);
-  message.arr[0] = SSH_MSG_KEXINIT;
-  for(int i=1; i<17; i++) {
-    message.arr[i] = rand();
+packet clone_pak(packet p) {
+  packet out;
+  out.packet_length = p.packet_length;
+  out.padding_length = p.padding_length;
+  out.payload.len = p.payload.len;
+  out.payload.arr = malloc(out.payload.len);
+  memcpy(out.payload.arr, p.payload.arr, out.payload.len);
+  out.padding = malloc(out.padding_length);
+  memcpy(out.padding, p.padding, out.padding_length);
+  out.mac.len = p.mac.len;
+  if(out.mac.len > 0) {
+    out.mac.arr = malloc(out.mac.len);
+    memcpy(out.mac.arr, p.mac.arr, out.mac.len);
+  } else {
+    out.mac.arr = NULL;
   }
-  message.len = 17;
-
-  message.len+=build_name_list(NO_KEX_C_ALGOS, KEX_C_ALGOS, message.arr+message.len);
-
-  message.len+=build_name_list(NO_KEY_C_ALGOS, KEY_C_ALGOS, message.arr+message.len);
-
-  message.len+=build_name_list(NO_ENC_ALGOS, ENC_ALGOS, message.arr+message.len);
-  message.len+=build_name_list(NO_ENC_ALGOS, ENC_ALGOS, message.arr+message.len);
-
-  message.len+=build_name_list(NO_MAC_ALGOS, MAC_ALGOS, message.arr+message.len);
-  message.len+=build_name_list(NO_MAC_ALGOS, MAC_ALGOS, message.arr+message.len);
-
-  message.len+=build_name_list(NO_COM_ALGOS, COM_ALGOS, message.arr+message.len);
-  message.len+=build_name_list(NO_COM_ALGOS, COM_ALGOS, message.arr+message.len);
-
-  int_to_bytes(0, message.arr+message.len);
-  int_to_bytes(0, message.arr+message.len+4);
-  message.len+=8;
-
-  message.arr[message.len++]=0;
-
-  int_to_bytes(0, message.arr+message.len);
-  message.len+=4;
-
-  packet p = build_packet(message, c);
-
-  free(message.arr);
-
-  return p;
+  return out;
 }
 
 int send_packet(packet p, connection *c) {
@@ -73,8 +55,11 @@ packet build_packet(const byte_array_t in, connection *c) {
 
   p.packet_length = in.len + p.padding_length + 1;
 
-  p.payload = malloc(in.len);
-  memcpy(p.payload, in.arr, in.len);
+  //p.payload = malloc(in.len);
+  p.payload.len = in.len;
+  p.payload.arr = malloc(p.payload.len);
+  memcpy(p.payload.arr, in.arr, p.payload.len);
+  //memcpy(p.payload, in.arr, in.len);
 
   if(c->mac_c2s) {
     byte_array_t to_mac;
@@ -83,8 +68,8 @@ packet build_packet(const byte_array_t in, connection *c) {
     int_to_bytes(c->sequence_number, to_mac.arr);
     int_to_bytes(p.packet_length, to_mac.arr + 4);
     to_mac.arr[8] = p.padding_length;
-    memcpy(to_mac.arr+9, p.payload, p.packet_length - p.padding_length - 1);
-    memcpy(to_mac.arr+9+p.packet_length-p.padding_length-1, p.padding, p.padding_length);
+    memcpy(to_mac.arr+9, p.payload.arr, p.payload.len);
+    memcpy(to_mac.arr+9+p.payload.len, p.padding, p.padding_length);
     c->mac_c2s->mac(to_mac, c->mac_c2s->key, c->mac_c2s->hash,
         c->mac_c2s->hash_block_size, &p.mac);
     free(to_mac.arr);
@@ -96,14 +81,84 @@ packet build_packet(const byte_array_t in, connection *c) {
   return p;
 }
 
-uint32_t build_name_list(uint32_t no_names, const char *names[], uint8_t *out_bytes) {
-  uint32_t stringLength = 0;
-  for(int i=0; i<no_names; i++) {
-    memcpy(out_bytes+stringLength+4, names[i], strlen(names[i]));
-    stringLength+=strlen(names[i]);
-    if(i+1<no_names)
-      (out_bytes+(stringLength++)+5)[0] = ',';
+/* Creates the KEXINIT packet, consisting of name lists of viable
+ * algorithms for kex, encryption etc. See rfc4253§7.1. */
+packet build_kex_init(connection *c) {
+
+  byte_array_t message;
+  message.len = 17;
+  message.arr = malloc(message.len);
+  message.arr[0] = SSH_MSG_KEXINIT;
+  //The first 16 bytes are a random 'cookie'
+  for(int i=1; i<17; i++) {
+    message.arr[i] = rand();
   }
-  int_to_bytes(stringLength, out_bytes);
-  return stringLength+4;
+
+  build_name_list(NO_KEX_C_ALGOS, KEX_C_ALGOS, &message);
+  build_name_list(NO_KEY_C_ALGOS, KEY_C_ALGOS, &message);
+
+  build_name_list(NO_ENC_ALGOS, ENC_ALGOS, &message);
+  build_name_list(NO_ENC_ALGOS, ENC_ALGOS, &message);
+
+  build_name_list(NO_MAC_ALGOS, MAC_ALGOS, &message);
+  build_name_list(NO_MAC_ALGOS, MAC_ALGOS, &message);
+
+  build_name_list(NO_COM_ALGOS, COM_ALGOS, &message);
+  build_name_list(NO_COM_ALGOS, COM_ALGOS, &message);
+
+  //message.len+=build_name_list(NO_KEX_C_ALGOS, KEX_C_ALGOS,
+  //  message.arr+message.len);
+
+  /*message.len+=build_name_list(NO_KEY_C_ALGOS, KEY_C_ALGOS, message.arr+message.len);
+
+  message.len+=build_name_list(NO_ENC_ALGOS, ENC_ALGOS, message.arr+message.len);
+  message.len+=build_name_list(NO_ENC_ALGOS, ENC_ALGOS, message.arr+message.len);
+
+  message.len+=build_name_list(NO_MAC_ALGOS, MAC_ALGOS, message.arr+message.len);
+  message.len+=build_name_list(NO_MAC_ALGOS, MAC_ALGOS, message.arr+message.len);
+
+  message.len+=build_name_list(NO_COM_ALGOS, COM_ALGOS, message.arr+message.len);
+  message.len+=build_name_list(NO_COM_ALGOS, COM_ALGOS, message.arr+message.len);*/
+
+  message.len += 13;
+  message.arr = realloc(message.arr, message.len);
+  int_to_bytes(0, message.arr+message.len-13);
+  int_to_bytes(0, message.arr+message.len-9);
+  //message.len+=8;
+
+  (message.arr+message.len-5)[0]=0;
+
+  //int_to_bytes(0, message.arr+message.len);
+  //message.len+=4;
+  int_to_bytes(0, message.arr + message.len - 4);
+
+  packet p = build_packet(message, c);
+
+  free(message.arr);
+
+  return p;
+}
+
+void build_name_list(uint32_t no_names,
+                     const char *names[],
+                     byte_array_t *out) {
+  uint32_t startPos = out->len;
+  uint32_t strLen = 0;
+  out->len += 4;
+  for(int i=0; i<no_names-1; i++) {
+    out->len += strlen(names[i]) + 1;
+    out->arr = realloc(out->arr, out->len);
+    memcpy(out->arr + out->len - strlen(names[i]) - 1, names[i],
+        strlen(names[i]));
+    out->arr[out->len - 1] = ',';
+    strLen += strlen(names[i]) + 1;
+  }
+  out->len += strlen(names[no_names - 1]);
+  out->arr = realloc(out->arr, out->len);
+  memcpy(out->arr + out->len - strlen(names[no_names - 1]), names[no_names-1],
+      strlen(names[no_names - 1]));
+  strLen += strlen(names[no_names - 1]);
+
+  int_to_bytes(strLen, out->arr + out->len - strLen - 4);
+
 }
