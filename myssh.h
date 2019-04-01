@@ -46,7 +46,6 @@ typedef struct enc_struct {
 typedef struct packet {
   uint32_t packet_length;
   uint8_t padding_length;
-  //uint8_t *payload;
   byte_array_t payload;
   uint8_t *padding;
   byte_array_t mac;
@@ -99,7 +98,6 @@ void byteArray_into_byteArray(const byte_array_t, byte_array_t *);
 void string_into_byteArray(const char *, byte_array_t *);
 
 void mpint_to_bignum(const uint8_t *, uint32_t, bn_t);
-//uint32_t bignum_to_mpint(const bn_t, uint8_t *);
 void bignum_into_mpint(const bn_t, byte_array_t *);
 void bignum_to_byteArray(const bn_t, byte_array_t *);
 void bignum_to_byteArray_u(const bn_t, byte_array_t *);
@@ -124,6 +122,7 @@ int aes_ctr(const byte_array_t, const byte_array_t,
     byte_array_t *, byte_array_t *);
 
 /*der*/
+void free_der(der_val_t *);
 int base64_to_byteArray(const char *, byte_array_t *);
 int32_t decode_der_string(const byte_array_t, der_val_t **);
 void print_der_val(const der_val_t);
@@ -131,9 +130,11 @@ void print_der_val(const der_val_t);
 /*user_auth*/
 int user_auth_publickey(connection *, const char*, const char*,
     const char*, const char*);
-int sign_message(const byte_array_t, const char *, const bn_t, const bn_t,
-    byte_array_t *);
-int get_private_key(const char *, bn_t, uint32_t*, bn_t);
+//int sign_message(const byte_array_t, const char *, const bn_t, const bn_t,
+//    byte_array_t *);
+int sign_message(const byte_array_t, const char *, byte_array_t *, int, ...);
+//int get_private_key(const char *, bn_t, uint32_t*, bn_t);
+int get_private_key(const char *, int, ...);
 int get_public_key(const char *, byte_array_t *);
 
 /*connection*/

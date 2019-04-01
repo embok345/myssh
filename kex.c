@@ -68,7 +68,6 @@ uint8_t kex_dh_14_rsa(connection *c,
   if(kex_dh_reply->payload.arr[0] != SSH_MSG_KEXDH_REPLY) {
     return 1;//TODO error code
   }
-  free_pak(kex_dh_reply);
 
   /* Retrieve the public key, f, and the signature */
   //TODO we should really check that we can access all of these things
@@ -120,8 +119,8 @@ uint8_t kex_dh_14_rsa(connection *c,
 
   bn_nukes(7, &em, &s, &exponent, &n, &p, &g, &x);
   free(sig);
-  //free_pak(kex_dh_reply);
-
+  free_pak(kex_dh_reply);
+  free(kex_dh_reply);
 }
 
 /* Gets the algorithms to use for kex etc, based on the byte array

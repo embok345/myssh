@@ -108,8 +108,8 @@ int32_t decode_der_string(const byte_array_t in, der_val_t **out) {
           }
         } else {
           new_int->type = 4;
-          new_int->value = malloc(sizeof(void *));
-          bignum *new_bn;
+          //new_int->value = malloc(sizeof(void *));
+          bn_t new_bn;
           bn_init(&new_bn);
           bn_resize(new_bn, int_length);
           if(in.arr[i] >= 128) {
@@ -231,6 +231,8 @@ int32_t decode_der_string(const byte_array_t in, der_val_t **out) {
 
         int32_t no_sub_vals = decode_der_string(sub_arr, &sub_vals);
 
+        free(sub_arr.arr);
+
         if(no_sub_vals == -1) return -1;
 
         der_seq_t *seq = malloc(sizeof(der_seq_t));
@@ -250,6 +252,36 @@ int32_t decode_der_string(const byte_array_t in, der_val_t **out) {
     }
   }
   return no_elements;
+}
+
+void free_der(der_val_t *val) {
+  if(val->type == 1) {
+    free(val->value);
+  }
+  if(val->type == 6) {
+    byte_array_t *oid = (byte_array_t *)val->value;
+    free(oid->arr);
+    free(oid);
+  }
+  if(val->type == 2) {
+    der_int_t *der_int = (der_int_t *)val->value;
+    if(der_int->type == 1 || der_int->type == 2 || der_int->type == 3)
+      free(der_int->value);
+    if(der_int->type == 4) {
+      bn_t der_int_val = (bn_t)(der_int->value);
+      bn_nuke(&der_int_val);
+    }
+    free(der_int);
+  }
+  if(val->type == 0x30 || val->type == 4) {
+    der_seq_t *seq = (der_seq_t*)val->value;
+    for(int i=0; i<seq->no_elements; i++) {
+      der_val_t seq_val = (seq->elements)[i];
+      free_der(&seq_val);
+    }
+    free(seq->elements);
+    free(seq);
+  }
 }
 
 void print_der_val(const der_val_t der) {
@@ -297,17 +329,3 @@ void print_der_val(const der_val_t der) {
     printf("Unknown Id: %"PRIu8"\n", der.type);
   }
 }
-/*
-int main() {
-  byte_array_t private_key_bytes;
-  base64_to_byteArray(private_key, &private_key_bytes);
-  der_val_t *vals;
-  int32_t no_vals = decode_der_string(private_key_bytes, &vals);
-  if(no_vals < 0) {
-    printf("Something went wrong\n");
-    return 1;
-  }
-  for(int i=0; i<no_vals; i++) {
-    print_der_val(vals[i]);
-  }
-}*/

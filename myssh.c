@@ -48,8 +48,8 @@ int main() {
   printf("Doing auth\n");
 
   if(user_auth_publickey(&con, "locked", "rsa-sha2-256",
-    "/home/poulter/.ssh/id_rsa2.pub",
-    "/home/poulter/.ssh/id_rsa2") == 1)
+      "/home/poulter/.ssh/id_rsa2.pub",
+      "/home/poulter/.ssh/id_rsa2") == 1)
     return 1;
 
   printf("Done auth\n");
@@ -422,6 +422,7 @@ uint8_t kex_init(connection *c) {
   free(chosen_algos);
   free_pak(&kex_init_c);
   free_pak(kex_init_s);
+  free(kex_init_s);
 
   /* Compute the keys, and ivs as in rfc4253§7.2, namely as
    * HASH(K||exchange_hash||char||c->session_id), where char
@@ -504,6 +505,7 @@ uint8_t kex_init(connection *c) {
     return 1; //TODO error code
   }
   free_pak(new_keys_pak_s);
+  free(new_keys_pak_s);
 
   //Set the new keys to be used
   if(!c->session_id)
