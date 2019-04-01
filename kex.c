@@ -38,8 +38,8 @@ uint8_t kex_dh_14_rsa(connection *c,
     bn_t *K,            //=2^xy=e^y=f^x mod p, the shared secret
     byte_array_t *signature) { //The signature of the exchange hash
 
-  pthread_t tid;
-  pthread_create(&tid, NULL, listener_thread, (void *)c);
+  //pthread_t tid;
+  //pthread_create(&tid, NULL, listener_thread, (void *)c);
 
   /* Set up the numbers we need */
   bn_t p, g, x;
@@ -63,19 +63,20 @@ uint8_t kex_dh_14_rsa(connection *c,
   send_packet(kex_dh_init_pak, c);
   free_pak(&kex_dh_init_pak);
 
-  packet *kex_dh_reply;
+  /*packet *kex_dh_reply;
   pthread_join(tid, (void **)&kex_dh_reply);
-  if(kex_dh_reply->payload.arr[0] != SSH_MSG_KEXDH_REPLY) {
+  if(kex_dh_reply.payload.arr[0] != SSH_MSG_KEXDH_REPLY) {
     return 1;//TODO error code
-  }
+  }*/
+  packet kex_dh_reply = wait_for_packet(c, 1, SSH_MSG_KEXDH_REPLY);
 
   /* Retrieve the public key, f, and the signature */
   //TODO we should really check that we can access all of these things
 
   //The first object should be the public key
-  K_S->len = bytes_to_int(kex_dh_reply->payload.arr + 1);
+  K_S->len = bytes_to_int(kex_dh_reply.payload.arr + 1);
   K_S->arr = malloc(K_S->len);
-  memcpy(K_S->arr, kex_dh_reply->payload.arr+5,K_S->len);
+  memcpy(K_S->arr, kex_dh_reply.payload.arr+5,K_S->len);
 
   //The modulus (n) and exponent are encoded in the public key
   //as mpints, so put them into bignums
@@ -88,18 +89,18 @@ uint8_t kex_dh_14_rsa(connection *c,
   mpint_to_bignum(K_S->arr+19+len_exp, len_n, n);
 
   //The second object should be f = 2^y mod p
-  uint32_t len_f = bytes_to_int(kex_dh_reply->payload.arr+5+K_S->len);
+  uint32_t len_f = bytes_to_int(kex_dh_reply.payload.arr+5+K_S->len);
   bn_init(f);
-  mpint_to_bignum(kex_dh_reply->payload.arr + 9 + K_S->len, len_f, *f);
+  mpint_to_bignum(kex_dh_reply.payload.arr + 9 + K_S->len, len_f, *f);
 
   //Now we have f, we can compute K = f^x mod p
   bn_init(K);
   bn_powmod(*f, x, p, *K);
 
   //The final entry of the packet should be the signature
-  uint32_t len_sig = bytes_to_int(kex_dh_reply->payload.arr+9+K_S->len+len_f);
+  uint32_t len_sig = bytes_to_int(kex_dh_reply.payload.arr+9+K_S->len+len_f);
   uint8_t *sig = malloc(len_sig);
-  memcpy(sig, kex_dh_reply->payload.arr+13+K_S->len+len_f, len_sig);
+  memcpy(sig, kex_dh_reply.payload.arr+13+K_S->len+len_f, len_sig);
   uint32_t label_len = bytes_to_int(sig);
   //TODO we should really check the name is as expected
 
@@ -119,8 +120,8 @@ uint8_t kex_dh_14_rsa(connection *c,
 
   bn_nukes(7, &em, &s, &exponent, &n, &p, &g, &x);
   free(sig);
-  free_pak(kex_dh_reply);
-  free(kex_dh_reply);
+  free_pak(&kex_dh_reply);
+  //free(kex_dh_reply);
 }
 
 /* Gets the algorithms to use for kex etc, based on the byte array

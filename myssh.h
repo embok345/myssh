@@ -51,6 +51,13 @@ typedef struct packet {
   byte_array_t mac;
 } packet;
 
+typedef struct packet_lock {
+  packet *p;
+  pthread_cond_t packet_handled;
+  pthread_cond_t packet_present;
+  pthread_mutex_t mutex;
+} packet_lock;
+
 typedef struct connection {
   int socket;
   uint32_t sequence_number;
@@ -59,7 +66,16 @@ typedef struct connection {
   mac_struct *mac_s2c;
   enc_struct *enc_c2s;
   enc_struct *enc_s2c;
+  packet_lock pak;
 } connection;
+
+typedef struct channel {
+  uint32_t local_channel;
+  uint32_t remote_channel;
+  uint32_t maximum_packet_size;
+  uint32_t window_size;
+  connection *c;
+} channel;
 
 typedef struct der_val_t {
   uint8_t type;
@@ -77,7 +93,11 @@ typedef struct der_seq_t {
 /*main*/
 uint8_t start_connection(connection *);
 uint8_t kex_init(connection *);
-void *listener_thread(void *);
+packet wait_for_packet(connection *, int, ...);
+
+/*listeners*/
+void *reader_listener(void *);
+void *global_request_listener(void *);
 
 /*kex*/
 void compute_exchange_hash(void (*)(const byte_array_t, byte_array_t *),
@@ -104,6 +124,7 @@ void bignum_to_byteArray_u(const bn_t, byte_array_t *);
 
 /*packets*/
 packet clone_pak(packet);
+void copy_pak(const packet *, packet *);
 packet build_kex_init(connection *);
 packet build_packet(const byte_array_t, connection *);
 void build_name_list(uint32_t, const char **, byte_array_t *);
@@ -137,7 +158,7 @@ int sign_message(const byte_array_t, const char *, byte_array_t *, int, ...);
 int get_private_key(const char *, int, ...);
 int get_public_key(const char *, byte_array_t *);
 
-/*connection*/
-int open_session(connection *);
+/*channel*/
+int open_channel(connection *);
 
 #endif

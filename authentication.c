@@ -9,9 +9,6 @@ int user_auth_publickey(connection *con,
                         const char *algo_name,
                         const char *pub_key_file,
                         const char *priv_key_file) {
-  pthread_t tid;
-  pthread_create(&tid, NULL, listener_thread, (void *)con);
-
   /* Send the userauth service request. This probably shouldn't be here as it
    * should probably only occur before the first auth attempt.
    * See rfc4253§10.
@@ -29,16 +26,15 @@ int user_auth_publickey(connection *con,
   free(service_request_message.arr);
 
   /*Receive the response to the userauth service request */
-  packet *service_request_response;
-  pthread_join(tid, (void **)&service_request_response);
-  if(service_request_response->payload.len < 1) {
+  packet service_request_response =
+      wait_for_packet(con, 1, SSH_MSG_SERVICE_ACCEPT);
+  if(service_request_response.payload.len != strlen(service_name) + 5 ||
+      strncmp(service_name, service_request_response.payload.arr + 5,
+        strlen(service_name)) != 0) {
+    printf("Service request failed\n");
     return MYSSH_AUTH_FAIL;
   }
-  //TODO check if the response is positive. This should either be a
-  //success or a disconnect. There is no other option.
-  free_pak(service_request_response);
-  free(service_request_response);
-  pthread_create(&tid, NULL, listener_thread, (void *)con);
+  free_pak(&service_request_response);
 
   /* Prepare the userauth-request using publickey, as
    * per rfc4252§7 */
@@ -69,21 +65,30 @@ int user_auth_publickey(connection *con,
   //It is possible that the public key format would not be correct,
   //but it is for now.
   byteArray_into_byteArray(public_key, &userauth_request);
-  free(public_key.arr);
 
   packet pk_query = build_packet(userauth_request, con);
   send_packet(pk_query, con);
   free_pak(&pk_query);
 
-  packet *pk_query_response;
-  pthread_join(tid, (void **)&pk_query_response);
-  if(pk_query_response->payload.arr[0] != SSH_MSG_USERAUTH_PK_OK) {
-    return 1; //TODO return something better
+  packet pk_query_response = wait_for_packet(con, 2,
+      SSH_MSG_USERAUTH_PK_OK, SSH_MSG_USERAUTH_FAILURE);
+  if(pk_query_response.payload.arr[0] == SSH_MSG_USERAUTH_FAILURE) {
+    printf("Public key not accepted\n");
+    return MYSSH_AUTH_FAIL;//TODO get the reason
+  } else if(pk_query_response.payload.arr[0] != SSH_MSG_USERAUTH_PK_OK) {
+    //never reached
+    return MYSSH_AUTH_FAIL;
+  } else if(pk_query_response.payload.len <
+      strlen(algo_name) + public_key.len + 9 ||
+      memcmp(algo_name, pk_query_response.payload.arr + 5, strlen(algo_name))
+        != 0 ||
+      memcmp(public_key.arr, pk_query_response.payload.arr + 9 +
+        strlen(algo_name), public_key.len) != 0) {
+    printf("Wrong public key accepted\n");
+    return MYSSH_AUTH_FAIL;
   }
-  free_pak(pk_query_response);
-  free(pk_query_response);
-
-  pthread_create(&tid, NULL, listener_thread, (void *)con);
+  free(public_key.arr);
+  free_pak(&pk_query_response);
 
   /* Once the public key has been accepted in principle,
    * retrieve the private key, and compute the signature */
@@ -128,13 +133,21 @@ int user_auth_publickey(connection *con,
   free_pak(&signed_pak);
 
   /* Wait to see if the authentication was successful */
-  packet *userauth_response;
-  pthread_join(tid, (void **)&userauth_response);
-  if(userauth_response->payload.arr[0] != SSH_MSG_USERAUTH_SUCCESS)
-    return 1;
-
-  free_pak(userauth_response);
-  free(userauth_response);
+  packet userauth_response = wait_for_packet(con, 2,
+      SSH_MSG_USERAUTH_SUCCESS, SSH_MSG_USERAUTH_FAILURE);
+  if(userauth_response.payload.arr[0] == SSH_MSG_USERAUTH_FAILURE) {
+    printf("Auth failed\n");
+    free_pak(&userauth_response);
+    return MYSSH_AUTH_FAIL;//TODO get more info from failure
+  } else if(userauth_response.payload.arr[0] == SSH_MSG_USERAUTH_SUCCESS) {
+    free_pak(&userauth_response);
+    //printf("Auth succeded\n");
+    return MYSSH_AUTH_SUCCESS;
+  } else {
+    //never reached
+    free_pak(&userauth_response);
+    return MYSSH_AUTH_FAIL;
+  }
   return 0;
 }
 
