@@ -1,6 +1,101 @@
 #include "myssh.h"
 
-//TODO comment
+
+typedef struct der_val_t {
+  uint8_t type;
+  void *value;
+} der_val_t;
+
+typedef der_val_t der_int_t;
+
+typedef struct der_seq_t {
+  uint32_t no_elements;
+  der_val_t *elements;
+} der_seq_t;
+
+
+void free_der(der_val_t *);
+int32_t decode_der_string(const byte_array_t, der_val_t **);
+void print_der_val(const der_val_t);
+
+uint8_t decode_private_key(const byte_array_t bytes,
+    int no_elements, va_list valist) {
+
+  der_val_t *vals;
+  int32_t no_vals = decode_der_string(bytes, &vals);
+
+  if(no_vals!=1) return 1;
+
+  if(vals[0].type != 0x30) return 1;
+  der_seq_t seq = *((der_seq_t *)vals[0].value);
+
+  if(seq.no_elements != 9) return 1;
+
+  if(seq.elements[0].type != 2) return 1;
+  der_int_t v = *((der_int_t*)seq.elements[0].value);
+  if(v.type!=1 || *((uint8_t*)(v.value))!=0) return 1;
+
+  if(no_elements == 2) {
+    if(seq.elements[1].type != 2) return 1;
+    v = *((der_int_t*)seq.elements[1].value);
+    if(v.type!=4) return 1;
+    bn_t n = va_arg(valist, bn_t);
+    bn_clone(n, (bn_t)v.value);
+    bn_removezeros(n);
+
+    if(seq.elements[3].type != 2) return 1;
+    v = *((der_int_t*)seq.elements[3].value);
+    if(v.type!=4) return 1;
+    bn_t d = va_arg(valist, bn_t);
+    bn_clone(d, (bn_t)(v.value));
+    bn_removezeros(d);
+  } else if(no_elements == 5) {
+    if(seq.elements[4].type != 2) return 1;
+    v = *((der_int_t*)seq.elements[4].value);
+    if(v.type!=4) return 1;
+    bn_t p = va_arg(valist, bn_t);
+    bn_clone(p, (bn_t)v.value);
+    bn_removezeros(p);
+
+    if(seq.elements[5].type != 2) return 1;
+    v = *((der_int_t*)seq.elements[5].value);
+    if(v.type!=4) return 1;
+    bn_t q = va_arg(valist, bn_t);
+    bn_clone(q, (bn_t)(v.value));
+    bn_removezeros(q);
+
+    if(seq.elements[6].type != 2) return 1;
+    v = *((der_int_t*)seq.elements[6].value);
+    if(v.type!=4) return 1;
+    bn_t dP = va_arg(valist, bn_t);
+    bn_clone(dP, (bn_t)v.value);
+    bn_removezeros(dP);
+
+    if(seq.elements[7].type != 2) return 1;
+    v = *((der_int_t*)seq.elements[7].value);
+    if(v.type!=4) return 1;
+    bn_t dQ = va_arg(valist, bn_t);
+    bn_clone(dQ, (bn_t)(v.value));
+    bn_removezeros(dQ);
+
+    if(seq.elements[8].type != 2) return 1;
+    v = *((der_int_t*)seq.elements[8].value);
+    if(v.type!=4) return 1;
+    bn_t qInv = va_arg(valist, bn_t);
+    bn_clone(qInv, (bn_t)(v.value));
+    bn_removezeros(qInv);
+  } else {
+    //never reached
+    return 1;
+  }
+
+  for(int i=0; i<no_vals; i++) {
+    free_der(&(vals[i]));
+  }
+  free(vals);
+
+  return 0;
+}
 
 int base64_to_byteArray(const char *in, byte_array_t *out) {
   if(strlen(in)%4!=0)

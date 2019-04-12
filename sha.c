@@ -83,11 +83,8 @@ sha_256_blocks_t preprocess_sha_256(const byte_array_t in) {
   uint64_t len = ((uint64_t)in.len)<<3;
   long_into_bytes(len, (paddedArray.arr)+in.len+1+k);
 
-  //sha_256_blocks_t *out = malloc(sizeof(sha_256_blocks_t));
   sha_256_blocks_t out;
-  //out->noBlocks = paddedArray.len/64;
   out.noBlocks = paddedArray.len/64;
-  //out->blocks = malloc(out->noBlocks * sizeof(uint8_t*));
   out.blocks = malloc(out.noBlocks * sizeof(uint8_t*));
   for(uint32_t i=0; i<out.noBlocks; i++) {
     (out.blocks)[i] = malloc(64);

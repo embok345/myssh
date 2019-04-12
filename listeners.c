@@ -1,12 +1,108 @@
 #include "myssh.h"
 
-void *global_request_listener(void *arg) {
-  connection *c = (connection *)arg;
+void *channel_listener(void *args) {
+  struct stuff {connection *c; uint32_t channel;} *arg =
+      (struct stuff *)args;
+  connection *c = arg->c;
+  uint32_t channel = arg->channel;
   while(1) {
-    packet global_request = wait_for_packet(c, 1, SSH_MSG_GLOBAL_REQUEST);
-    //TODO actually do something with this
-    printf("Got global request\n");
-    free_pak(&global_request);
+    packet message = wait_for_channel_packet(c, channel);
+    char *msg_str = NULL, *command = NULL;
+    if(message.payload.arr[0] == SSH_MSG_CHANNEL_DATA) {
+      uint32_t message_length = bytes_to_int(message.payload.arr + 5);
+      msg_str = realloc(msg_str, message_length + 1);
+      strncpy(msg_str, message.payload.arr + 9, message_length);
+      msg_str[message_length] = '\0';
+      command = realloc(command, strlen(msg_str) + 11);
+      sprintf(command, "echo -n \"%s\"", msg_str);
+      system(command);
+    }
+    free_pak(message);
+  }
+}
+
+packet wait_for_channel_packet(connection *c, uint32_t channel) {
+  packet received_packet;
+  byte_array_t codes;
+  codes.len = 10;
+  codes.arr = malloc(codes.len);
+  for(int i=0; i<10; i++) {
+    codes.arr[i] = 91+i;
+  }
+  while(1) {
+    //Acquire the lock, and check if there is a packet present
+    pthread_mutex_lock(&(c->pak.mutex));
+    while(!(c->pak.p)) {
+      //Wait until a packet arrives
+      pthread_cond_wait(&(c->pak.packet_present), &(c->pak.mutex));
+    }
+    //We now own the lock, and a packet is present
+    if(c->pak.p->payload.len < 5 ||
+        !byteArray_contains(codes, c->pak.p->payload.arr[0]) ||
+        bytes_to_int(c->pak.p->payload.arr + 1) != channel) {
+      //If we can't get a code, or the code is not the one we
+      //want, wait till this packet is handled
+      pthread_cond_wait(&(c->pak.packet_handled), &(c->pak.mutex));
+      pthread_mutex_unlock(&(c->pak.mutex));
+    } else {
+      //If we have the message we want, copy it out
+      received_packet = clone_pak(*(c->pak.p));
+      free_pak(*(c->pak.p));
+      free(c->pak.p);
+      c->pak.p = NULL;
+      //Let the listener know we're done with the packet
+      pthread_cond_broadcast(&(c->pak.packet_handled));
+      pthread_mutex_unlock(&(c->pak.mutex));
+      free(codes.arr);
+      return received_packet;
+    }
+  }
+}
+
+packet wait_for_packet(connection *c, int no_codes, ...) {
+  packet received_packet;
+  byte_array_t codes;
+  if(no_codes == 0) {
+    codes.len = 256;
+    codes.arr = malloc(codes.len);
+    for(int i=0; i<codes.len; i++) {
+      codes.arr[i] = i;
+    }
+  } else {
+    codes.len = no_codes;
+    codes.arr = malloc(no_codes);
+    va_list valist;
+    va_start(valist, no_codes);
+    for(int i=0; i<no_codes; i++)
+      codes.arr[i] = va_arg(valist, int);
+    va_end(valist);
+  }
+  while(1) {
+    //Acquire the lock, and check if there is a packet present
+    pthread_mutex_lock(&(c->pak.mutex));
+    while(!(c->pak.p)) {
+      //Wait until a packet arrives
+      pthread_cond_wait(&(c->pak.packet_present), &(c->pak.mutex));
+    }
+    //We now own the lock, and a packet is present
+    if(c->pak.p->payload.len < 1 ||
+        !byteArray_contains(codes, c->pak.p->payload.arr[0])) {
+      //If we can't get a code, or the code is not the one we
+      //want, wait till this packet is handled
+      pthread_cond_wait(&(c->pak.packet_handled), &(c->pak.mutex));
+      pthread_mutex_unlock(&(c->pak.mutex));
+    } else {
+      //If we have the message we want, copy it out
+      received_packet = clone_pak(*(c->pak.p));
+      free_pak(*(c->pak.p));
+      free(c->pak.p);
+      c->pak.p = NULL;
+      //Let the listener know we're done with the packet
+      pthread_cond_broadcast(&(c->pak.packet_handled));
+      pthread_mutex_unlock(&(c->pak.mutex));
+      free(codes.arr);
+      return received_packet;
+    }
   }
 }
 
@@ -28,10 +124,17 @@ void *reader_listener(void *arg) {
     byte_array_t first_block;
     first_block.len = block_size;
     first_block.arr = malloc(first_block.len);
-    if(recv(c->socket, first_block.arr, first_block.len, 0) < block_size) {
+    uint32_t recvd_bytes;
+    if((recvd_bytes = recv(c->socket, first_block.arr, first_block.len, 0))
+        < block_size) {
       //If we don't receive the right number of bytes, there's an error
-      printf("Received fewer than expected bytes\n");
-      return NULL;
+      FILE *log = fopen(LOG_NAME, "a");
+      fprintf(log, "Received fewer than expected bytes:");
+      fprintf(log, "Expected %"PRIu32" but got %"PRIu32"\n", block_size,
+          recvd_bytes);
+      fclose(log);
+      //return NULL;
+      exit(1);
     }
 
     byte_array_t read, temp;
@@ -136,10 +239,40 @@ void *reader_listener(void *arg) {
 
     free(read.arr);
 
-    pthread_cond_broadcast(&(c->pak.packet_present));
-    while(c->pak.p) {
-      pthread_cond_wait(&(c->pak.packet_handled), &(c->pak.mutex));
+    uint8_t code = c->pak.p->payload.arr[0];
+    if(code == SSH_MSG_DISCONNECT) {
+      return NULL;
+    } else if(code == SSH_MSG_IGNORE) {
+      free_pak(*(c->pak.p));
+      free(c->pak.p);
+      c->pak.p = NULL;
+      pthread_mutex_unlock(&(c->pak.mutex));
+    } else if(code == SSH_MSG_UNIMPLEMENTED) {
+      free_pak(*(c->pak.p));
+      free(c->pak.p);
+      c->pak.p = NULL;
+      pthread_mutex_unlock(&(c->pak.mutex));
+    } else if(code == SSH_MSG_DEBUG) {
+      free_pak(*(c->pak.p));
+      free(c->pak.p);
+      c->pak.p = NULL;
+      pthread_mutex_unlock(&(c->pak.mutex));
+    } else if(code == SSH_MSG_GLOBAL_REQUEST) {
+      free_pak(*(c->pak.p));
+      free(c->pak.p);
+      c->pak.p = NULL;
+      pthread_mutex_unlock(&(c->pak.mutex));
+    } else {
+      pthread_cond_broadcast(&(c->pak.packet_present));
+      while(c->pak.p) {
+        pthread_cond_wait(&(c->pak.packet_handled), &(c->pak.mutex));
+      }
+      pthread_mutex_unlock(&(c->pak.mutex));
     }
-    pthread_mutex_unlock(&(c->pak.mutex));
   }
+}
+
+void start_reader(connection *c) {
+  pthread_t reader;
+  pthread_create(&reader, NULL, reader_listener, (void *)c);
 }

@@ -22,7 +22,7 @@ int user_auth_publickey(connection *con,
   packet service_request = build_packet(service_request_message, con);
   send_packet(service_request, con);
 
-  free_pak(&service_request);
+  free_pak(service_request);
   free(service_request_message.arr);
 
   /*Receive the response to the userauth service request */
@@ -32,9 +32,9 @@ int user_auth_publickey(connection *con,
       strncmp(service_name, service_request_response.payload.arr + 5,
         strlen(service_name)) != 0) {
     printf("Service request failed\n");
+    free_pak(service_request_response);
     return MYSSH_AUTH_FAIL;
   }
-  free_pak(&service_request_response);
 
   /* Prepare the userauth-request using publickey, as
    * per rfc4252§7 */
@@ -68,7 +68,7 @@ int user_auth_publickey(connection *con,
 
   packet pk_query = build_packet(userauth_request, con);
   send_packet(pk_query, con);
-  free_pak(&pk_query);
+  free_pak(pk_query);
 
   packet pk_query_response = wait_for_packet(con, 2,
       SSH_MSG_USERAUTH_PK_OK, SSH_MSG_USERAUTH_FAILURE);
@@ -88,7 +88,7 @@ int user_auth_publickey(connection *con,
     return MYSSH_AUTH_FAIL;
   }
   free(public_key.arr);
-  free_pak(&pk_query_response);
+  free_pak(pk_query_response);
 
   /* Once the public key has been accepted in principle,
    * retrieve the private key, and compute the signature */
@@ -130,22 +130,22 @@ int user_auth_publickey(connection *con,
   send_packet(signed_pak, con);
 
   free(userauth_request.arr);
-  free_pak(&signed_pak);
+  free_pak(signed_pak);
 
   /* Wait to see if the authentication was successful */
   packet userauth_response = wait_for_packet(con, 2,
       SSH_MSG_USERAUTH_SUCCESS, SSH_MSG_USERAUTH_FAILURE);
   if(userauth_response.payload.arr[0] == SSH_MSG_USERAUTH_FAILURE) {
     printf("Auth failed\n");
-    free_pak(&userauth_response);
+    free_pak(userauth_response);
     return MYSSH_AUTH_FAIL;//TODO get more info from failure
   } else if(userauth_response.payload.arr[0] == SSH_MSG_USERAUTH_SUCCESS) {
-    free_pak(&userauth_response);
+    free_pak(userauth_response);
     //printf("Auth succeded\n");
     return MYSSH_AUTH_SUCCESS;
   } else {
     //never reached
-    free_pak(&userauth_response);
+    free_pak(userauth_response);
     return MYSSH_AUTH_FAIL;
   }
   return 0;
@@ -228,7 +228,6 @@ int sign_message(const byte_array_t to_sign,
   return 0;
 }
 
-//int get_private_key(const char *file_name, bn_t n, uint32_t *e, bn_t d) {
 int get_private_key(const char *file_name, int no_elements, ...) {
 
   if(no_elements != 2 && no_elements !=5)
@@ -270,84 +269,13 @@ int get_private_key(const char *file_name, int no_elements, ...) {
 
   free(private_key);
 
-  der_val_t *vals;
-  int32_t no_vals = decode_der_string(private_key_bytes, &vals);
+  va_list arg_list;
+  va_start(arg_list, no_elements);
+  if(decode_private_key(private_key_bytes, no_elements, arg_list)!=0)
+    return 1;
+  va_end(arg_list);
 
   free(private_key_bytes.arr);
-
-  if(no_vals!=1) return 1;
-
-  if(vals[0].type != 0x30) return 1;
-  der_seq_t seq = *((der_seq_t *)vals[0].value);
-
-  if(seq.no_elements != 9) return 1;
-
-  if(seq.elements[0].type != 2) return 1;
-  der_int_t v = *((der_int_t*)seq.elements[0].value);
-  if(v.type!=1 || *((uint8_t*)(v.value))!=0) return 1;
-
-  va_list valist;
-  va_start(valist, no_elements);
-
-  if(no_elements == 2) {
-    if(seq.elements[1].type != 2) return 1;
-    v = *((der_int_t*)seq.elements[1].value);
-    if(v.type!=4) return 1;
-    bn_t n = va_arg(valist, bn_t);
-    bn_clone(n, (bn_t)v.value);
-    bn_removezeros(n);
-
-    if(seq.elements[3].type != 2) return 1;
-    v = *((der_int_t*)seq.elements[3].value);
-    if(v.type!=4) return 1;
-    bn_t d = va_arg(valist, bn_t);
-    bn_clone(d, (bn_t)(v.value));
-    bn_removezeros(d);
-  } else if(no_elements == 5) {
-    if(seq.elements[4].type != 2) return 1;
-    v = *((der_int_t*)seq.elements[4].value);
-    if(v.type!=4) return 1;
-    bn_t p = va_arg(valist, bn_t);
-    bn_clone(p, (bn_t)v.value);
-    bn_removezeros(p);
-
-    if(seq.elements[5].type != 2) return 1;
-    v = *((der_int_t*)seq.elements[5].value);
-    if(v.type!=4) return 1;
-    bn_t q = va_arg(valist, bn_t);
-    bn_clone(q, (bn_t)(v.value));
-    bn_removezeros(q);
-
-    if(seq.elements[6].type != 2) return 1;
-    v = *((der_int_t*)seq.elements[6].value);
-    if(v.type!=4) return 1;
-    bn_t dP = va_arg(valist, bn_t);
-    bn_clone(dP, (bn_t)v.value);
-    bn_removezeros(dP);
-
-    if(seq.elements[7].type != 2) return 1;
-    v = *((der_int_t*)seq.elements[7].value);
-    if(v.type!=4) return 1;
-    bn_t dQ = va_arg(valist, bn_t);
-    bn_clone(dQ, (bn_t)(v.value));
-    bn_removezeros(dQ);
-
-    if(seq.elements[8].type != 2) return 1;
-    v = *((der_int_t*)seq.elements[8].value);
-    if(v.type!=4) return 1;
-    bn_t qInv = va_arg(valist, bn_t);
-    bn_clone(qInv, (bn_t)(v.value));
-    bn_removezeros(qInv);
-  } else {
-    //never reached
-    return 1;
-  }
-
-  for(int i=0; i<no_vals; i++) {
-    free_der(&(vals[i]));
-  }
-  free(vals);
-  va_end(valist);
 
   return 0;
 }

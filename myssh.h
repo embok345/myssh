@@ -13,14 +13,28 @@
 #include <pthread.h>
 #include <ctype.h>
 #include <bignum.h>
+#include <termio.h>
+#include <netdb.h>
 
 #include "names.h"
 #include "numbers.h"
+
+extern const char *LOG_NAME;
 
 typedef struct byte_array_t {
   uint32_t len;
   uint8_t *arr;
 } byte_array_t;
+typedef struct byte_array* _byte_array_t;
+
+_byte_array_t create_byteArray(uint32_t);
+_byte_array_t set_byteArray(uint32_t, const uint8_t *);
+void free_byteArray(_byte_array_t);
+void print_byteArray(const _byte_array_t);
+uint32_t get_byteArray_len(const _byte_array_t);
+uint8_t get_byteArray_element(const _byte_array_t, uint32_t);
+void set_byteArray_element(_byte_array_t, uint32_t, uint8_t);
+void increment_byteArray(_byte_array_t);
 
 typedef struct mac_struct {
   void (*hash)(const byte_array_t, byte_array_t *);
@@ -77,29 +91,29 @@ typedef struct channel {
   connection *c;
 } channel;
 
-typedef struct der_val_t {
-  uint8_t type;
-  void *value;
-} der_val_t;
-
-typedef der_val_t der_int_t;
 typedef bignum* bn_t;
 
-typedef struct der_seq_t {
-  uint32_t no_elements;
-  der_val_t *elements;
-} der_seq_t;
-
 /*main*/
-uint8_t start_connection(connection *);
-uint8_t kex_init(connection *);
-packet wait_for_packet(connection *, int, ...);
+uint8_t version_exchange(connection *, char **, char **);
+
+/*util*/
+void free_enc(enc_struct *);
+void free_mac(mac_struct *);
+void copy_bytes(const uint8_t *, uint32_t, byte_array_t *);
+uint8_t byteArray_contains(const byte_array_t, uint8_t);
+char getch();
+connection create_connection_struct(int);
+void free_connection(connection);
+uint8_t isdigit_s(const char *);
 
 /*listeners*/
-void *reader_listener(void *);
-void *global_request_listener(void *);
+void start_reader(connection *);
+void *channel_listener(void *);
+packet wait_for_packet(connection *, int, ...);
+packet wait_for_channel_packet(connection *, uint32_t);
 
 /*kex*/
+uint8_t kex(connection *, const char *, const char *);
 void compute_exchange_hash(void (*)(const byte_array_t, byte_array_t *),
     byte_array_t *, int, ...);
 uint8_t kex_dh_14_rsa(connection *, byte_array_t *, bn_t*, bn_t*,
@@ -123,13 +137,13 @@ void bignum_to_byteArray(const bn_t, byte_array_t *);
 void bignum_to_byteArray_u(const bn_t, byte_array_t *);
 
 /*packets*/
-packet clone_pak(packet);
-void copy_pak(const packet *, packet *);
+packet clone_pak(const packet);
+void copy_pak(const packet, packet *);
+void free_pak(packet);
 packet build_kex_init(connection *);
 packet build_packet(const byte_array_t, connection *);
 void build_name_list(uint32_t, const char **, byte_array_t *);
-void free_pak(packet *);
-int send_packet(packet, connection *);
+int send_packet(const packet, connection *);
 
 
 /*sha*/
@@ -143,22 +157,19 @@ int aes_ctr(const byte_array_t, const byte_array_t,
     byte_array_t *, byte_array_t *);
 
 /*der*/
-void free_der(der_val_t *);
+uint8_t decode_private_key(const byte_array_t, int, va_list);
 int base64_to_byteArray(const char *, byte_array_t *);
-int32_t decode_der_string(const byte_array_t, der_val_t **);
-void print_der_val(const der_val_t);
 
 /*user_auth*/
 int user_auth_publickey(connection *, const char*, const char*,
     const char*, const char*);
-//int sign_message(const byte_array_t, const char *, const bn_t, const bn_t,
-//    byte_array_t *);
 int sign_message(const byte_array_t, const char *, byte_array_t *, int, ...);
-//int get_private_key(const char *, bn_t, uint32_t*, bn_t);
 int get_private_key(const char *, int, ...);
 int get_public_key(const char *, byte_array_t *);
 
 /*channel*/
-int open_channel(connection *);
+uint8_t open_channel(connection *, uint32_t, uint32_t *);
+void send_channel_message(const char *, uint32_t, connection *);
+void send_channel_char(char, uint32_t, connection *);
 
 #endif

@@ -2,26 +2,26 @@
 
 //TODO comment
 
-void free_pak(packet *p) {
-  free(p->payload.arr);
-  free(p->padding);
-  free(p->mac.arr);
+void free_pak(packet p) {
+  free(p.payload.arr);
+  free(p.padding);
+  free(p.mac.arr);
 }
 
-void copy_pak(const packet *in, packet *out) {
-  out->packet_length = in->packet_length;
-  out->padding_length = in->padding_length;
-  out->payload.len = in->payload.len;
+void copy_pak(const packet in, packet *out) {
+  out->packet_length = in.packet_length;
+  out->padding_length = in.padding_length;
+  out->payload.len = in.payload.len;
   out->payload.arr = malloc(out->payload.len);
-  memcpy(out->payload.arr, in->payload.arr, out->payload.len);
+  memcpy(out->payload.arr, in.payload.arr, out->payload.len);
   out->padding = malloc(out->padding_length);
-  memcpy(out->padding, in->padding, out->padding_length);
-  out->mac.len = in->mac.len;
+  memcpy(out->padding, in.padding, out->padding_length);
+  out->mac.len = in.mac.len;
   out->mac.arr = malloc(out->mac.len);
-  memcpy(out->mac.arr, in->mac.arr, out->mac.len);
+  memcpy(out->mac.arr, in.mac.arr, out->mac.len);
 }
 
-packet clone_pak(packet p) {
+packet clone_pak(const packet p) {
   packet out;
   out.packet_length = p.packet_length;
   out.padding_length = p.padding_length;
@@ -31,16 +31,12 @@ packet clone_pak(packet p) {
   out.padding = malloc(out.padding_length);
   memcpy(out.padding, p.padding, out.padding_length);
   out.mac.len = p.mac.len;
-  //if(out.mac.len > 0) {
-    out.mac.arr = malloc(out.mac.len);
-    memcpy(out.mac.arr, p.mac.arr, out.mac.len);
-  //} else {
-    //out.mac.arr = NULL;
-  //}
+  out.mac.arr = malloc(out.mac.len);
+  memcpy(out.mac.arr, p.mac.arr, out.mac.len);
   return out;
 }
 
-int send_packet(packet p, connection *c) {
+int send_packet(const packet p, connection *c) {
   byte_array_t bytes;
   packet_to_bytes(p, c, &bytes);
   send(c->socket, bytes.arr, bytes.len, 0);

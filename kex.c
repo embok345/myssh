@@ -61,13 +61,8 @@ uint8_t kex_dh_14_rsa(connection *c,
   packet kex_dh_init_pak = build_packet(kex_dh_init_payload, c);
   free(kex_dh_init_payload.arr);
   send_packet(kex_dh_init_pak, c);
-  free_pak(&kex_dh_init_pak);
+  free_pak(kex_dh_init_pak);
 
-  /*packet *kex_dh_reply;
-  pthread_join(tid, (void **)&kex_dh_reply);
-  if(kex_dh_reply.payload.arr[0] != SSH_MSG_KEXDH_REPLY) {
-    return 1;//TODO error code
-  }*/
   packet kex_dh_reply = wait_for_packet(c, 1, SSH_MSG_KEXDH_REPLY);
 
   /* Retrieve the public key, f, and the signature */
@@ -120,8 +115,7 @@ uint8_t kex_dh_14_rsa(connection *c,
 
   bn_nukes(7, &em, &s, &exponent, &n, &p, &g, &x);
   free(sig);
-  free_pak(&kex_dh_reply);
-  //free(kex_dh_reply);
+  free_pak(kex_dh_reply);
 }
 
 /* Gets the algorithms to use for kex etc, based on the byte array
@@ -259,4 +253,300 @@ char *get_chosen_algo(uint8_t *arr, uint32_t len,
   free(s_algos);
 
   return chosen_algo;
+}
+
+
+uint8_t kex(connection *c, const char *v_c, const char *v_s) {
+  //Send the kex init packet
+  packet kex_init_c = build_kex_init(c);
+  send_packet(kex_init_c, c);
+
+  //Receive the kex init packet
+  packet kex_init_s = wait_for_packet(c, 1, SSH_MSG_KEXINIT);
+
+  /* Determine which algorithms will be used */
+  uint32_t list_offset = 17;
+  //Get the algorithms to use. These are the first client choice
+  //which also occurs as a server choice.
+  //TODO really we should pass the algo list which we sent as well.
+  char **chosen_algos = get_chosen_algos(kex_init_s.payload.arr, &list_offset);
+  if(!chosen_algos) {
+    printf("Could not determine algorithms to use\n");
+    return 1; //TODO return an error code
+  }
+
+  /*Set the functions hash functions to be used in key exchange */
+  void (*kex_hash_fun)(const byte_array_t, byte_array_t *);
+  void (*key_hash_fun)(const byte_array_t, byte_array_t *);
+  uint32_t kex_hash_output_len;
+
+  if(strcmp(chosen_algos[0], KEX_DH_GP14_SHA256) == 0) {
+    kex_hash_fun = sha_256;
+    kex_hash_output_len = 32;
+  } else {
+    //This of course should never be reached
+    printf("KEX algorithm unsupported: %s\n", chosen_algos[0]);
+    return 1;//TODO error code
+  }
+  if(strcmp(chosen_algos[1], KEY_RSA_SHA2_256) == 0)
+    key_hash_fun = sha_256;
+  else {
+    //never reached
+    printf("Public key algorithm unsupported: %s\n", chosen_algos[1]);
+    return 1;//TODO error code
+  }
+
+
+  /* Set the encryption algorithms */
+  enc_struct *new_enc_c2s, *new_enc_s2c;
+  new_enc_c2s = malloc(sizeof(enc_struct));
+  new_enc_s2c = malloc(sizeof(enc_struct));
+
+  if(strcmp(chosen_algos[2], ENC_AES256_CTR) == 0) {
+    new_enc_c2s->enc = aes_ctr;
+    new_enc_c2s->dec = aes_ctr;
+    new_enc_c2s->block_size = 16;
+    new_enc_c2s->key_size = 32;
+  } else if(strcmp(chosen_algos[2], ENC_AES192_CTR) == 0) {
+    new_enc_c2s->enc = aes_ctr;
+    new_enc_c2s->dec = aes_ctr;
+    new_enc_c2s->block_size = 16;
+    new_enc_c2s->key_size = 24;
+  } else if(strcmp(chosen_algos[2], ENC_AES128_CTR) == 0) {
+    new_enc_c2s->enc = aes_ctr;
+    new_enc_c2s->dec = aes_ctr;
+    new_enc_c2s->block_size = 16;
+    new_enc_c2s->key_size = 16;
+  } else {
+    //never reached
+    printf("Encryption algorithm not supported: %s\n", chosen_algos[2]);
+    return 1;//TODO error code
+  }
+
+  if(strcmp(chosen_algos[3], ENC_AES256_CTR) == 0) {
+    new_enc_s2c->enc = aes_ctr;
+    new_enc_s2c->dec = aes_ctr;
+    new_enc_s2c->block_size = 16;
+    new_enc_s2c->key_size = 32;
+  } else if(strcmp(chosen_algos[3], ENC_AES192_CTR) == 0) {
+    new_enc_s2c->enc = aes_ctr;
+    new_enc_s2c->dec = aes_ctr;
+    new_enc_s2c->block_size = 16;
+    new_enc_s2c->key_size = 24;
+  } else if(strcmp(chosen_algos[3], ENC_AES128_CTR) == 0) {
+    new_enc_s2c->enc = aes_ctr;
+    new_enc_s2c->dec = aes_ctr;
+    new_enc_s2c->block_size = 16;
+    new_enc_s2c->key_size = 16;
+  } else {
+    //never reached
+    printf("Encryption algorithm not supported: %s\n", chosen_algos[3]);
+    return 1; //TODO error code
+  }
+
+  /* Set the mac algorithms */
+  mac_struct *new_mac_c2s, *new_mac_s2c;
+  new_mac_c2s = malloc(sizeof(mac_struct));
+  new_mac_s2c = malloc(sizeof(mac_struct));
+
+  if(strcmp(chosen_algos[4], MAC_HMAC_SHA256) == 0) {
+    new_mac_c2s->hash = sha_256;
+    new_mac_c2s->mac = hmac;
+    new_mac_c2s->hash_block_size = 64;
+    new_mac_c2s->mac_output_size = 32;
+  } else {
+    //never reached
+    printf("MAC algorithm not supported: %s\n", chosen_algos[4]);
+    return 1;//TODO error code
+  }
+
+  if(strcmp(chosen_algos[5], MAC_HMAC_SHA256) == 0) {
+    new_mac_s2c->hash = sha_256;
+    new_mac_s2c->mac = hmac;
+    new_mac_s2c->hash_block_size = 64;
+    new_mac_s2c->mac_output_size = 32;
+  } else {
+    //never reached
+    printf("MAC algorithm not supported: %s\n", chosen_algos[5]);
+    return 1;//TODO error code
+  }
+
+  //Compression must be none
+  if(strcmp(chosen_algos[6], NONE) != 0 || strcmp(chosen_algos[7], NONE) != 0) {
+    printf("Compression algorithm not supported: %s\n", chosen_algos[6]);
+    return 1;
+  }
+
+  //Do the key exchange
+  byte_array_t host_key, signature;
+  bn_t e, f, K;
+  kex_dh_14_rsa(c, &host_key, &e, &f, &K, &signature);
+  //TODO obviously this would be different if using different algos.
+
+  /*Compute the exchange hash, as in rfc4253§8*/
+  byte_array_t vc, vs, ic, is, e_b, f_b, K_b;
+  vc.len = strlen(v_c)-2;
+  vs.len = strlen(v_s)-2;
+  vc.arr = malloc(vc.len);
+  memcpy(vc.arr, v_c, vc.len);
+  vs.arr = malloc(vs.len);
+  memcpy(vs.arr, v_s, vs.len);
+  ic = kex_init_c.payload;
+  is = kex_init_s.payload;
+  bignum_to_byteArray(e, &e_b);
+  bignum_to_byteArray(f, &f_b);
+  bignum_to_byteArray(K, &K_b);
+  //TODO the things going in to the hash may be different too.
+
+  byte_array_t *exchange_hash = malloc(sizeof(byte_array_t));
+
+  compute_exchange_hash(kex_hash_fun, exchange_hash, 8, vc, vs, ic, is,
+      host_key, e_b, f_b, K_b);
+
+  free(vc.arr);
+  free(vs.arr);
+  free(host_key.arr);
+  free(e_b.arr);
+  free(f_b.arr);
+  free(K_b.arr);
+
+  /*Compute the signature, and make sure it is the same as the one
+   *received from the server */
+  byte_array_t computed_signature;
+  key_hash_fun(*exchange_hash, &computed_signature);
+  for(int i=0; i<computed_signature.len; i++) {
+    if(computed_signature.arr[i] !=
+        signature.arr[signature.len-computed_signature.len+i])
+      return 1;
+  }
+  //TODO we shouldn't do it in this way, we should encode the computed
+  //signature properly with ASN.1, then check they are the same (I think
+  //it says that somewhere in the specs)
+
+  free(computed_signature.arr);
+  free(signature.arr);
+  for(int i=0; i<8; i++) {
+    free(chosen_algos[i]);
+  }
+  free(chosen_algos);
+  free_pak(kex_init_c);
+  free_pak(kex_init_s);
+
+  /* Compute the keys, and ivs as in rfc4253§7.2, namely as
+   * HASH(K||exchange_hash||char||c->session_id), where char
+   * ranges from 'A' to 'F', and K is encoded as mpint, the
+   * rest as bytes */
+  byte_array_t prehash = {0, NULL};
+  bignum_into_mpint(K, &prehash);
+  prehash.len += exchange_hash->len;
+  prehash.arr = realloc(prehash.arr, prehash.len);
+  memcpy(prehash.arr + prehash.len - exchange_hash->len, exchange_hash->arr,
+      exchange_hash->len);
+  uint32_t character_pos = prehash.len;
+  prehash.len+=1;
+  //If we don't have a session_id, use the exchange_hash, as it
+  //will become the session_id
+  if(!c->session_id) {
+    prehash.len += exchange_hash->len;
+    prehash.arr = realloc(prehash.arr, prehash.len);
+    memcpy(prehash.arr + prehash.len - exchange_hash->len, exchange_hash->arr,
+        exchange_hash->len);
+  } else {
+    prehash.len += c->session_id->len;
+    prehash.arr = realloc(prehash.arr, prehash.len);
+    memcpy(prehash.arr + prehash.len - c->session_id->len, c->session_id->arr,
+        c->session_id->len);
+  }
+
+  prehash.arr[character_pos] = 'A';
+  kex_hash_fun(prehash, &(new_enc_c2s->iv));
+  //Resize the output of the hash to the correct size.
+  if(new_enc_c2s->block_size > kex_hash_output_len) {
+    //TODO enlarge the iv if the hash is too short
+  } else {
+    new_enc_c2s->iv.len = new_enc_c2s->block_size;
+  }
+
+  prehash.arr[character_pos] = 'B';
+  kex_hash_fun(prehash, &(new_enc_s2c->iv));
+  if(new_enc_s2c->block_size > kex_hash_output_len) {
+    //TODO --"--
+  } else {
+    new_enc_s2c->iv.len = new_enc_s2c->block_size;
+  }
+
+  prehash.arr[character_pos] = 'C';
+  kex_hash_fun(prehash, &(new_enc_c2s->key));
+  if(new_enc_c2s->block_size > kex_hash_output_len) {
+    //TODO --"--
+  } else {
+    new_enc_c2s->key.len = new_enc_c2s->key_size;
+  }
+
+  prehash.arr[character_pos] = 'D';
+  kex_hash_fun(prehash, &(new_enc_s2c->key));
+  if(new_enc_s2c->block_size > kex_hash_output_len) {
+    //TODO --"--
+  } else {
+    new_enc_s2c->key.len = new_enc_s2c->key_size;
+  }
+
+  prehash.arr[character_pos] = 'E';
+  kex_hash_fun(prehash, &(new_mac_c2s->key));
+  prehash.arr[character_pos] = 'F';
+  kex_hash_fun(prehash, &(new_mac_s2c->key));
+  //TODO maybe we want to change the length of the mac keys?
+
+  /* Send the NEWKEYS message */
+  uint8_t new_keys_bytes[] = {SSH_MSG_NEWKEYS};
+  byte_array_t new_keys = {1, new_keys_bytes};
+  packet new_keys_pak = build_packet(new_keys, c);
+  send_packet(new_keys_pak, c);
+  free_pak(new_keys_pak);
+
+  //Wait to receive the new keys packet
+  //We can't just call wait_for_packet, as we need to retain the mutex
+  //in order to change the keys
+  packet *new_keys_pak_s = NULL;
+  while(!new_keys_pak_s) {
+    pthread_mutex_lock(&(c->pak.mutex));
+    while(!(c->pak.p)) {
+      pthread_cond_wait(&(c->pak.packet_present), &(c->pak.mutex));
+    }
+    //We now own the lock, and a packet is present
+    if(c->pak.p->payload.arr[0] == SSH_MSG_NEWKEYS) {
+      //If we get the new keys packet, break out
+      free_pak(*(c->pak.p));
+      free(c->pak.p);
+      c->pak.p = NULL;
+      break;
+    } else {
+      //Otherwise, wait for the next packet to arrive
+      pthread_cond_wait(&(c->pak.packet_handled), &(c->pak.mutex));
+    }
+  }
+
+  //Set the new keys to be used
+  if(!c->session_id)
+    c->session_id = exchange_hash;
+  if(c->enc_c2s)
+    free_enc(c->enc_c2s);
+  c->enc_c2s = new_enc_c2s;
+  if(c->enc_s2c)
+    free_enc(c->enc_s2c);
+  c->enc_s2c = new_enc_s2c;
+  if(c->mac_c2s)
+    free_mac(c->mac_c2s);
+  c->mac_c2s = new_mac_c2s;
+  if(c->mac_s2c)
+    free_mac(c->mac_s2c);
+  c->mac_s2c = new_mac_s2c;
+
+  //Notify that the packet has been dealt with
+  pthread_cond_broadcast(&(c->pak.packet_handled));
+  pthread_mutex_unlock(&(c->pak.mutex));
+
+  bn_nukes(3, &e, &f, &K);
+  free(prehash.arr);
+  return 0;
 }

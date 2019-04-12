@@ -53,15 +53,6 @@ typedef struct keys {
   uint32_t *w;
 } keys;
 
-void print_sm(state_matrix s) {
-  for(int i=0; i<4; i++) {
-    for(int j=0; j<4; j++) {
-      printf("%x ", s.m[i][j]);
-    }
-    printf("\n");
-  }
-}
-
 state_matrix zero_matrix() {
   state_matrix m;
   for(int i=0; i<4; i++) {
@@ -216,13 +207,16 @@ uint32_t rot_word(uint32_t in) {
 }
 
 keys expand_key(const byte_array_t k) {
-  if(k.len!=16 && k.len!=24 && k.len!=32) {
-    printf("This aint right\n");
-    //TODO return something here.
-  }
-  uint8_t no_rounds = (k.len/4) + 6;
+  //uint32_t k_len = get_byteArray_len(k);
+  uint32_t k_len = k.len;
   keys ks;
-  ks.key_size = k.len;
+  ks.key_size = k_len;
+  ks.w = NULL;
+  if(k_len != 16 && k_len != 24 && k_len != 32) {
+    printf("Invalid key length\n");
+    return ks;
+  }
+  uint8_t no_rounds = (k_len/4) + 6;
   ks.w = malloc(sizeof(uint32_t) * 4 * (no_rounds+1));
   uint32_t temp;
   int i=0;
@@ -230,8 +224,9 @@ keys expand_key(const byte_array_t k) {
     ks.w[i] = 0;
     for(int j=0; j<4; j++) {
       ks.w[i] <<= 8;
-      if(4*i + j < k.len)
+      if(4*i + j < k_len)
         ks.w[i] += (uint32_t)k.arr[4*i+j];
+        //ks.w[i] += (uint32_t)get_byteArray_element(k, 4*i+j);
     }
     i++;
   }
@@ -317,28 +312,32 @@ state_matrix byteArray_to_stateMatrix(const byte_array_t arr) {
         out.m[i][j] = 0;
       else
         out.m[i][j] = arr.arr[4*j+i];
+      //out.m[i][j] = get_byteArray_element(arr, 4*j + i);
     }
   }
   return out;
 }
+
 byte_array_t stateMatrix_to_byteArray(state_matrix in) {
+  //_byte_array_t ret = create_byteArray(16);
   byte_array_t ret;
   ret.len = 16;
   ret.arr = malloc(16);
   for(int i=0; i<4; i++) {
     for(int j=0; j<4; j++) {
       ret.arr[4*j+i] = in.m[i][j];
+      //set_byteArray_element(ret, 4*j+i);
     }
   }
   return ret;
 }
 
-void increment_byte_array(byte_array_t *in) {
-  uint32_t pos = in->len-1;
-  in->arr[pos] = (in->arr[pos]) + 1;
-  while(in->arr[pos] == 0 && pos>0) {
+void increment_byte_array(byte_array_t in) {
+  uint32_t pos = in.len-1;
+  in.arr[pos] = (in.arr[pos]) + 1;
+  while(in.arr[pos] == 0 && pos>0) {
     pos--;
-    (in->arr[pos])++;
+    (in.arr[pos])++;
   }
 }
 
@@ -367,7 +366,7 @@ int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t *ctr, by
       out->arr[16*i + j] = in.arr[16*i + j] ^ aes_out.arr[j];
     }
     free(aes_out.arr);
-    increment_byte_array(ctr);
+    increment_byte_array(*ctr);
   }
 
   free(k.w);
