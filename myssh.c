@@ -134,6 +134,7 @@ int main(int argc, char *argv[]) {
 
   start_reader(&con);
 
+  printf("Doing kex\n");
   uint8_t kex_ret = kex(&con, v_c, v_s);
   if(kex_ret) {
     fprintf(stderr, "Could not complete kex\n");
@@ -143,6 +144,7 @@ int main(int argc, char *argv[]) {
     free(v_s);
     return 1;
   }
+  printf("Done kex\n");
 
   //TODO change this to use the correct auth type
   uint8_t auth_ret = user_auth_publickey(&con, uname,

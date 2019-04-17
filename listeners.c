@@ -8,11 +8,12 @@ void *channel_listener(void *args) {
   while(1) {
     packet message = wait_for_channel_packet(c, channel);
     char *msg_str = NULL, *command = NULL;
-    if(message.payload.arr[0] == SSH_MSG_CHANNEL_DATA) {
-      uint32_t message_length = bytes_to_int(message.payload.arr + 5);
+    if(get_byteArray_element(message.payload, 0) == SSH_MSG_CHANNEL_DATA) {
+      uint32_t message_length = byteArray_to_int(message.payload, 5);
       msg_str = realloc(msg_str, message_length + 1);
-      strncpy(msg_str, message.payload.arr + 9, message_length);
-      msg_str[message_length] = '\0';
+      //strncpy(msg_str, message.payload.arr + 9, message_length);
+      byteArray_strncpy(msg_str, message.payload, 9, message_length);
+      //msg_str[message_length] = '\0';
       command = realloc(command, strlen(msg_str) + 11);
       sprintf(command, "echo -n \"%s\"", msg_str);
       system(command);
@@ -23,11 +24,12 @@ void *channel_listener(void *args) {
 
 packet wait_for_channel_packet(connection *c, uint32_t channel) {
   packet received_packet;
-  byte_array_t codes;
-  codes.len = 10;
-  codes.arr = malloc(codes.len);
+  _byte_array_t codes = create_byteArray(10);
+  //codes.len = 10;
+  //codes.arr = malloc(codes.len);
   for(int i=0; i<10; i++) {
-    codes.arr[i] = 91+i;
+    //codes.arr[i] = 91+i;
+    set_byteArray_element(codes, i, 91+i);
   }
   while(1) {
     //Acquire the lock, and check if there is a packet present
@@ -37,9 +39,12 @@ packet wait_for_channel_packet(connection *c, uint32_t channel) {
       pthread_cond_wait(&(c->pak.packet_present), &(c->pak.mutex));
     }
     //We now own the lock, and a packet is present
-    if(c->pak.p->payload.len < 5 ||
-        !byteArray_contains(codes, c->pak.p->payload.arr[0]) ||
-        bytes_to_int(c->pak.p->payload.arr + 1) != channel) {
+    //if(c->pak.p->payload.len < 5 ||
+    //    !byteArray_contains(codes, c->pak.p->payload.arr[0]) ||
+    //    bytes_to_int(c->pak.p->payload.arr + 1) != channel) {
+    if(get_byteArray_len(c->pak.p->payload) < 5 ||
+        !byteArray_contains(codes, get_byteArray_element(c->pak.p->payload, 0)) ||
+        byteArray_to_int(c->pak.p->payload, 1) != channel) {
       //If we can't get a code, or the code is not the one we
       //want, wait till this packet is handled
       pthread_cond_wait(&(c->pak.packet_handled), &(c->pak.mutex));
@@ -53,7 +58,7 @@ packet wait_for_channel_packet(connection *c, uint32_t channel) {
       //Let the listener know we're done with the packet
       pthread_cond_broadcast(&(c->pak.packet_handled));
       pthread_mutex_unlock(&(c->pak.mutex));
-      free(codes.arr);
+      free_byteArray(codes);
       return received_packet;
     }
   }
@@ -61,32 +66,37 @@ packet wait_for_channel_packet(connection *c, uint32_t channel) {
 
 packet wait_for_packet(connection *c, int no_codes, ...) {
   packet received_packet;
-  byte_array_t codes;
+  _byte_array_t codes;
+  printf("Waiting for packet\n");
   if(no_codes == 0) {
-    codes.len = 256;
-    codes.arr = malloc(codes.len);
-    for(int i=0; i<codes.len; i++) {
-      codes.arr[i] = i;
+    //codes.len = 256;
+    //codes.arr = malloc(codes.len);
+    codes = create_byteArray(256);
+    for(int i=0; i<256; i++) {
+      set_byteArray_element(codes, i, i);
     }
   } else {
-    codes.len = no_codes;
-    codes.arr = malloc(no_codes);
+    //codes.len = no_codes;
+    //codes.arr = malloc(no_codes);
+    codes = create_byteArray(no_codes);
     va_list valist;
     va_start(valist, no_codes);
     for(int i=0; i<no_codes; i++)
-      codes.arr[i] = va_arg(valist, int);
+      set_byteArray_element(codes, i, va_arg(valist, int));
     va_end(valist);
   }
   while(1) {
     //Acquire the lock, and check if there is a packet present
+    printf("Getting lock\n");
     pthread_mutex_lock(&(c->pak.mutex));
+    printf("Got lock\n");
     while(!(c->pak.p)) {
       //Wait until a packet arrives
       pthread_cond_wait(&(c->pak.packet_present), &(c->pak.mutex));
     }
     //We now own the lock, and a packet is present
-    if(c->pak.p->payload.len < 1 ||
-        !byteArray_contains(codes, c->pak.p->payload.arr[0])) {
+    if(get_byteArray_len(c->pak.p->payload) < 1 ||
+        !byteArray_contains(codes, get_byteArray_element(c->pak.p->payload,0))) {
       //If we can't get a code, or the code is not the one we
       //want, wait till this packet is handled
       pthread_cond_wait(&(c->pak.packet_handled), &(c->pak.mutex));
@@ -100,7 +110,7 @@ packet wait_for_packet(connection *c, int no_codes, ...) {
       //Let the listener know we're done with the packet
       pthread_cond_broadcast(&(c->pak.packet_handled));
       pthread_mutex_unlock(&(c->pak.mutex));
-      free(codes.arr);
+      free_byteArray(codes);
       return received_packet;
     }
   }
@@ -121,11 +131,11 @@ void *reader_listener(void *arg) {
     else
       //Otherwise read the blocksize of the encryption
       block_size = c->enc_s2c->block_size;
-    byte_array_t first_block;
-    first_block.len = block_size;
-    first_block.arr = malloc(first_block.len);
+    _byte_array_t first_block;
+    //first_block.len = block_size;
+    //first_block.arr = malloc(first_block.len);
     uint32_t recvd_bytes;
-    if((recvd_bytes = recv(c->socket, first_block.arr, first_block.len, 0))
+    if((recvd_bytes = recv_byteArray(c->socket, &first_block, block_size))
         < block_size) {
       //If we don't receive the right number of bytes, there's an error
       FILE *log = fopen(LOG_NAME, "a");
@@ -137,39 +147,44 @@ void *reader_listener(void *arg) {
       exit(1);
     }
 
-    byte_array_t read, temp;
+    _byte_array_t read, temp;
     if(c->enc_s2c) {
       //If there is encryption, try to decrypt the first block
-      if(c->enc_s2c->dec(first_block, c->enc_s2c->key, &(c->enc_s2c->iv),
+      if(c->enc_s2c->dec(first_block, c->enc_s2c->key, c->enc_s2c->iv,
           &temp) != 0) {
         printf("Error when decrypting\n");
         return NULL;
       }
-      read.len = temp.len;
-      read.arr = malloc(read.len);
-      memcpy(read.arr, temp.arr, read.len);
-      free(temp.arr);
+      //read.len = temp.len;
+      //read.arr = malloc(read.len);
+      //memcpy(read.arr, temp.arr, read.len);
+      //free(temp.arr);
+      read = copy_byteArray(temp);
+      free_byteArray(temp);
     } else {
       //Otherwise just copy the read bytes in
-      read.len = first_block.len;
-      read.arr = malloc(read.len);
-      memcpy(read.arr, first_block.arr, read.len);
+      //read.len = first_block.len;
+      //read.arr = malloc(read.len);
+      //memcpy(read.arr, first_block.arr, read.len);
+      read = copy_byteArray(first_block);
     }
-    free(first_block.arr);
+    free_byteArray(first_block);
 
     //Initialise the packet with the packet length and padding length,
     //malloc the spaces for the payload and padding
     c->pak.p = malloc(sizeof(packet));
-    c->pak.p->packet_length = bytes_to_int(read.arr);
-    c->pak.p->padding_length = (read.arr)[4];
+    c->pak.p->packet_length = byteArray_to_int(read, 0);
+    c->pak.p->padding_length = get_byteArray_element(read, 4);
     if((c->pak.p->packet_length + 4)%block_size != 0) {
       //Length of the packet must be a multiple of the block size
       printf("Invalid message length\n");
       return NULL; //TODO something else
     }
-    c->pak.p->payload.len = c->pak.p->packet_length -
-        c->pak.p->padding_length - 1;
-    c->pak.p->payload.arr = malloc(c->pak.p->payload.len);
+    //c->pak.p->payload.len = c->pak.p->packet_length -
+    //    c->pak.p->padding_length - 1;
+    //c->pak.p->payload.arr = malloc(c->pak.p->payload.len);
+    //c->pak.p->payload = create_byteArray(c->pak.p->packet_length -
+    //    c->pak.p->padding_length - 1);
     c->pak.p->padding = malloc(c->pak.p->padding_length);
 
     int to_receive = c->pak.p->packet_length + 4 - block_size;
@@ -182,64 +197,77 @@ void *reader_listener(void *arg) {
 
     if(to_receive > 0) {
       //Receive the rest of the packet
-      byte_array_t next_blocks;
-      next_blocks.len = to_receive;
-      next_blocks.arr = malloc(to_receive);
-      if(recv(c->socket, next_blocks.arr, to_receive, 0) < to_receive) {
+      //byte_array_t next_blocks;
+      //next_blocks.len = to_receive;
+      //next_blocks.arr = malloc(to_receive);
+      _byte_array_t next_blocks;
+      if(recv_byteArray(c->socket, &next_blocks, to_receive) < to_receive) {
         printf("Received fewer than expected bytes\n");
         return NULL;
       }
 
       //Decrypt the new blocks
       if(c->enc_s2c) {
-        if(c->enc_s2c->dec(next_blocks, c->enc_s2c->key, &(c->enc_s2c->iv),
+        if(c->enc_s2c->dec(next_blocks, c->enc_s2c->key, c->enc_s2c->iv,
             &temp) != 0) {
           printf("Error when decrypting\n");
           return NULL;
         }
-        read.len += temp.len;
-        read.arr = realloc(read.arr, read.len);
-        memcpy(read.arr + first_block.len, temp.arr,
-            read.len - first_block.len);
-        free(temp.arr);
+        byteArray_append_byteArray(read, temp);
+        //read.len += temp.len;
+        //read.arr = realloc(read.arr, read.len);
+        //memcpy(read.arr + first_block.len, temp.arr,
+        //    read.len - first_block.len);
+        free_byteArray(temp);
       } else {
-        read.len += next_blocks.len;
-        read.arr = realloc(read.arr, read.len);
-        memcpy(read.arr + first_block.len, next_blocks.arr,
-            read.len - first_block.len);
+        //read.len += next_blocks.len;
+        //read.arr = realloc(read.arr, read.len);
+        //memcpy(read.arr + first_block.len, next_blocks.arr,
+        //    read.len - first_block.len);
+        byteArray_append_byteArray(read, next_blocks);
       }
 
-      free(next_blocks.arr);
+      free_byteArray(next_blocks);
     }
 
     //Copy the decrypted bytes into the packet.
     //We could do this directly but the offsets and such may be tricky
-    memcpy(c->pak.p->payload.arr, read.arr + 5, c->pak.p->payload.len);
-    memcpy(c->pak.p->padding, read.arr + 5 + c->pak.p->payload.len,
+    //memcpy(c->pak.p->payload.arr, read.arr + 5, c->pak.p->payload.len);
+    c->pak.p->payload = sub_byteArray(read, 5, c->pak.p->packet_length -
+        c->pak.p->padding_length - 1);
+    //memcpy(c->pak.p->padding, read.arr + 5 + c->pak.p->payload.len,
+    //    c->pak.p->padding_length);
+    byteArray_strncpy(c->pak.p->padding, read, 5 + get_byteArray_len(c->pak.p->payload),
         c->pak.p->padding_length);
 
     //If there is a mac, get those blocks.
     if(c->mac_s2c) {
-      read.len += c->mac_s2c->mac_output_size;
-      read.arr = realloc(read.arr, read.len);
-      if(recv(c->socket, read.arr + read.len - c->mac_s2c->mac_output_size,
-          c->mac_s2c->mac_output_size, 0) < c->mac_s2c->mac_output_size) {
+      //read.len += c->mac_s2c->mac_output_size;
+      //read.arr = realloc(read.arr, read.len);
+      //if(recv(c->socket, read.arr + read.len - c->mac_s2c->mac_output_size,
+      //    c->mac_s2c->mac_output_size, 0) < c->mac_s2c->mac_output_size) {
+      //  printf("Received fewer than expected MAC bytes\n");
+      //  return NULL;
+      //}
+      //TODO we should check if the mac is the same
+      //c->pak.p->mac.len = c->mac_s2c->mac_output_size;
+      //c->pak.p->mac.arr = malloc(c->mac_s2c->mac_output_size);
+      //memcpy(c->pak.p->mac.arr, read.arr + read.len - c->mac_s2c->mac_output_size,
+      //    c->mac_s2c->mac_output_size);
+      if(recv_byteArray(c->socket, &(c->pak.p->mac), c->mac_s2c->mac_output_size)
+          < c->mac_s2c->mac_output_size) {
         printf("Received fewer than expected MAC bytes\n");
         return NULL;
       }
-      //TODO we should check if the mac is the same
-      c->pak.p->mac.len = c->mac_s2c->mac_output_size;
-      c->pak.p->mac.arr = malloc(c->mac_s2c->mac_output_size);
-      memcpy(c->pak.p->mac.arr, read.arr + read.len - c->mac_s2c->mac_output_size,
-          c->mac_s2c->mac_output_size);
     } else {
-      c->pak.p->mac.len = 0;
-      c->pak.p->mac.arr = NULL;
+      //c->pak.p->mac.len = 0;
+      //c->pak.p->mac.arr = NULL;
+      c->pak.p->mac = create_byteArray(0);
     }
 
-    free(read.arr);
+    free_byteArray(read);
 
-    uint8_t code = c->pak.p->payload.arr[0];
+    uint8_t code = get_byteArray_element(c->pak.p->payload, 0);
     if(code == SSH_MSG_DISCONNECT) {
       return NULL;
     } else if(code == SSH_MSG_IGNORE) {

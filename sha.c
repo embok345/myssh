@@ -12,92 +12,98 @@ typedef struct sha_256_blocks_t {
   uint32_t **blocks;
 } sha_256_blocks_t;
 
-void hmac(const byte_array_t data, const byte_array_t key,
-          void (*hash)(const byte_array_t, byte_array_t *),
+void hmac(const _byte_array_t data, const _byte_array_t key,
+          void (*hash)(const _byte_array_t, _byte_array_t *),
           uint8_t hash_block_size,
-          byte_array_t *output) {
+          _byte_array_t *output) {
 
-  byte_array_t ipad, opad;
-  ipad.len = key.len;
-  opad.len = key.len;
-  ipad.arr = malloc(ipad.len);
-  opad.arr = malloc(opad.len);
-  memcpy(ipad.arr, key.arr, ipad.len);
-  memcpy(opad.arr, key.arr, opad.len);
-  if(key.len < hash_block_size) {
-    ipad.len = hash_block_size;
+  _byte_array_t ipad, opad;
+  //ipad.len = key.len;
+  //opad.len = key.len;
+  //ipad.arr = malloc(ipad.len);
+  //opad.arr = malloc(opad.len);
+  //memcpy(ipad.arr, key.arr, ipad.len);
+  //memcpy(opad.arr, key.arr, opad.len);
+  ipad = copy_byteArray(key);
+  opad = copy_byteArray(key);
+
+  if(get_byteArray_len(key) < hash_block_size) {
+    /*ipad.len = hash_block_size;
     opad.len = hash_block_size;
     ipad.arr = realloc(ipad.arr, ipad.len);
     opad.arr = realloc(opad.arr, opad.len);
     for(int i=key.len; i<hash_block_size; i++) {
       ipad.arr[i] = 0;
       opad.arr[i] = 0;
-    }
-  } else if(key.len > hash_block_size) {
+    }*/
+    resize_byteArray(ipad, hash_block_size);
+    resize_byteArray(opad, hash_block_size);
+  } else if(get_byteArray_len(key) > hash_block_size) {
     printf("This shouldn't be reached\n");
     return;
   }
 
-  for(int i=0; i<ipad.len; i++) {
-    ipad.arr[i] ^= 0x36;
-    opad.arr[i] ^= 0x5c;
+  for(int i=0; i<get_byteArray_len(ipad); i++) {
+    //ipad.arr[i] ^= 0x36;
+    set_byteArray_element(ipad, i, get_byteArray_element(ipad, i)^0x36);
+    //opad.arr[i] ^= 0x5c;
+    set_byteArray_element(opad, i, get_byteArray_element(opad, i)^0x5c);
   }
 
-  ipad.len += data.len;
-  ipad.arr = realloc(ipad.arr, ipad.len);
-  memcpy(ipad.arr + ipad.len - data.len, data.arr, data.len);
-  byte_array_t temp;
+  //ipad.len += data.len;
+  //ipad.arr = realloc(ipad.arr, ipad.len);
+  //memcpy(ipad.arr + ipad.len - data.len, data.arr, data.len);
+  byteArray_append_byteArray(ipad, data);
+
+  _byte_array_t temp;
   hash(ipad, &temp);
-  opad.len += temp.len;
-  opad.arr = realloc(opad.arr, opad.len);
-  memcpy(opad.arr + opad.len - temp.len, temp.arr, temp.len);
+  //opad.len += temp.len;
+  //opad.arr = realloc(opad.arr, opad.len);
+  //memcpy(opad.arr + opad.len - temp.len, temp.arr, temp.len);
+  byteArray_append_byteArray(opad, temp);
   hash(opad, output);
 
-  free(ipad.arr);
-  free(opad.arr);
-  free(temp.arr);
+  free_byteArray(ipad);
+  free_byteArray(opad);
+  free_byteArray(temp);
 }
 
+sha_256_blocks_t preprocess_sha_256(const _byte_array_t in) {
 
-void long_into_bytes(uint64_t in, uint8_t* out) {
-  out[0] = (in>>56)%256;
-  out[1] = (in>>48)%256;
-  out[2] = (in>>40)%256;
-  out[3] = (in>>32)%256;
-  out[4] = (in>>24)%256;
-  out[5] = (in>>16)%256;
-  out[6] = (in>>8)%256;
-  out[7] = in%256;
-}
+  uint32_t in_len = get_byteArray_len(in);
+  uint32_t k = (120-((in_len+1)%64))%64;
 
-sha_256_blocks_t preprocess_sha_256(const byte_array_t in) {
-  byte_array_t paddedArray;
-  uint32_t k = (120-((in.len+1)%64))%64;
-  paddedArray.arr = malloc(in.len+1+k+8);
-  paddedArray.len = in.len+k+9;
-  memcpy(paddedArray.arr, in.arr, in.len);
-  paddedArray.arr[in.len] = 128;
-  for(uint32_t i=0; i<k; i++) {
-    paddedArray.arr[in.len+1+i] = 0;
-  }
-  uint64_t len = ((uint64_t)in.len)<<3;
-  long_into_bytes(len, (paddedArray.arr)+in.len+1+k);
+  //paddedArray.arr = malloc(in_len+1+k+8);
+  //paddedArray.len = in.len+k+9;
+  //memcpy(paddedArray.arr, in.arr, in.len);
+  //paddedArray.arr[in.len] = 128;
+  //for(uint32_t i=0; i<k; i++) {
+  //  paddedArray.arr[in.len+1+i] = 0;
+  //}
+  //uint64_t len = ((uint64_t)in.len)<<3;
+  //long_into_bytes(len, (paddedArray.arr)+in.len+1+k);
+  _byte_array_t paddedArray = copy_byteArray(in);
+  byteArray_append_byte(paddedArray, 128);
+  add_len_byteArray(paddedArray, k);
+  byteArray_append_long(paddedArray, ((uint64_t)in_len)<<3);
 
   sha_256_blocks_t out;
-  out.noBlocks = paddedArray.len/64;
+  //out.noBlocks = paddedArray.len/64;
+  out.noBlocks = get_byteArray_len(paddedArray)/64;
   out.blocks = malloc(out.noBlocks * sizeof(uint8_t*));
   for(uint32_t i=0; i<out.noBlocks; i++) {
     (out.blocks)[i] = malloc(64);
     for(uint32_t j=0; j<16; j++) {
       //This doesn't seem to work if you do it all on one line ?
-      uint32_t newInt = ((uint32_t)paddedArray.arr[i*64 + j*4])<<24;
-      newInt +=((uint32_t)paddedArray.arr[i*64+j*4+1])<<16;
-      newInt += ((uint32_t)paddedArray.arr[i*64+j*4+2])<<8;
-      newInt += (uint32_t)paddedArray.arr[i*64+j*4+3];
+      uint32_t newInt =
+          ((uint32_t)get_byteArray_element(paddedArray,i*64 + j*4))<<24;
+      newInt +=((uint32_t)get_byteArray_element(paddedArray,i*64+j*4+1))<<16;
+      newInt +=((uint32_t)get_byteArray_element(paddedArray,i*64+j*4+2))<<8;
+      newInt += (uint32_t)get_byteArray_element(paddedArray,i*64+j*4+3);
       out.blocks[i][j] = newInt;
     }
   }
-  free(paddedArray.arr);
+  free_byteArray(paddedArray);
 
   return out;
 
@@ -133,7 +139,7 @@ uint32_t sha256_maj(uint32_t x, uint32_t y, uint32_t z) {
   return (x&y) ^ (x&z) ^ (y&z);
 }
 
-void sha_256(byte_array_t in, byte_array_t *out) {
+void sha_256(_byte_array_t in, _byte_array_t *out) {
   sha_256_blocks_t blocks = preprocess_sha_256(in);
 
   uint32_t registers[8];
@@ -178,14 +184,19 @@ void sha_256(byte_array_t in, byte_array_t *out) {
   }
 
   // *out = malloc(32);
-  out->len = 32;
-  out->arr = malloc(32);
+  //out->len = 32;
+  //out->arr = malloc(32);
+  *out = create_byteArray(32);
 
   for(int i=0; i<8; i++) {
-    out->arr[4*i] = intermediate_hash[i]>>24;
-    out->arr[(4*i)+1] = (intermediate_hash[i]>>16) % 256;
-    out->arr[(4*i)+2] = (intermediate_hash[i]>>8) % 256;
-    out->arr[(4*i)+3] = intermediate_hash[i]%256;
+    //out->arr[4*i] = intermediate_hash[i]>>24;
+    set_byteArray_element(*out, 4*i, intermediate_hash[i]>>24);
+    //out->arr[(4*i)+1] = (intermediate_hash[i]>>16) % 256;
+    set_byteArray_element(*out, (4*i)+1, (intermediate_hash[i]>>16)%256);
+    //out->arr[(4*i)+2] = (intermediate_hash[i]>>8) % 256;
+    set_byteArray_element(*out, (4*i)+2, (intermediate_hash[i]>>8)%256);
+    //out->arr[(4*i)+3] = intermediate_hash[i]%256;
+    set_byteArray_element(*out, (4*i)+3, intermediate_hash[i]%256);
   }
   for(int i=0; i<blocks.noBlocks; i++) {
     free(blocks.blocks[i]);
