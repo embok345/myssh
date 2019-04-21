@@ -1,9 +1,8 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
-#include <math.h>
-#include "myssh.h"
+#include <string.h>
+#include "byte_array.h"
 
 //TODO comment
 
@@ -341,7 +340,45 @@ void increment_byte_array(byte_array_t in) {
   }
 }
 
-int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t *ctr, byte_array_t *out) {
+int inv_aes_cbc(const byte_array_t in, const byte_array_t key, byte_array_t *iv,
+    byte_array_t *out) {
+  if(key.len != 16 && key.len != 24 && key.len !=32) {
+    printf("Invalid key length\n");
+    return 1;
+  }
+  if(in.len%16 != 0) {
+    printf("Incorrect message length\n");
+    return 2;
+  }
+  if(iv->len != 16) {
+    printf("Incorrect IV length\n");
+    return 3;
+  }
+
+  out->len = in.len;
+  out->arr = malloc(out->len);
+  keys k = expand_key(key);
+
+  byte_array_t block;
+  block.len = 16;
+  block.arr = malloc(16);
+  for(uint32_t i=0; i<in.len/16; i++) {
+    //state_matrix iv_sm = byteArray_to_stateMatrix(*iv);
+    memcpy(block.arr, in.arr + i*16, 16);
+    state_matrix block_sm = byteArray_to_stateMatrix(block);
+    state_matrix aes_out_sm = __inv_aes__(block_sm, k);
+    byte_array_t aes_out = stateMatrix_to_byteArray(aes_out_sm);
+    for(uint32_t j=0; j<aes_out.len; j++) {
+      out->arr[16*i + j] = iv->arr[j] ^ aes_out.arr[j];
+    }
+    free(aes_out.arr);
+    memcpy(iv->arr, block.arr, 16);
+  }
+  free(block.arr);
+}
+
+int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t *ctr,
+    byte_array_t *out) {
   if(key.len != 16 && key.len != 24 && key.len !=32) {
     printf("Invalid key length\n");
     return 1;

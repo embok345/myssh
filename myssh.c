@@ -79,6 +79,45 @@ uint8_t get_host(const char *arg,
   return 0;
 }
 
+char *get_key_file(const char *name) {
+  if(!name || strlen(name)<1) return NULL;
+  char *key_file = NULL;
+  if(name[0] == '/') {
+    key_file = malloc(strlen(name)+1);
+    strcpy(key_file, name);
+    return key_file;
+  } else if(name[0] == '~') {
+    if(strlen(name) <= 2 || name[1] != '/') {
+      return NULL;
+    }
+    const char *homedir = getpwuid(getuid())->pw_dir;
+    if(!homedir) {
+      return NULL;
+    }
+    key_file = malloc(strlen(homedir) + strlen(name));
+    sprintf(key_file, "%s%s", homedir, name+1);
+    return key_file;
+  } else {
+    char *cwd = NULL;
+    char *temp = NULL;
+    uint32_t len = 100;
+    while(!temp && len<1000) {
+      cwd = realloc(cwd, len);
+      temp = getcwd(cwd, len);
+      len+=100;
+    }
+    if(!temp) {
+      free(cwd);
+      return NULL;
+    }
+    key_file = malloc(strlen(cwd) + strlen(name) + 2);
+    sprintf(key_file, "%s/%s", cwd, name);
+    free(cwd);
+    return key_file;
+  }
+  return NULL;
+}
+
 int main(int argc, char *argv[]) {
 
   srand(time(NULL));
@@ -96,7 +135,7 @@ int main(int argc, char *argv[]) {
   host.sin_family = AF_INET;
   host.sin_port = htons(22);
 
-  char *key_file;
+  char *key_file = NULL;
 
   for(int i=1; i<argc; i++) {
     if(argv[i][0] != '-') {
@@ -104,15 +143,29 @@ int main(int argc, char *argv[]) {
       if(gethost) {
         printf("Could not determine host\n");
         free(uname);
+        free(key_file);
         return 1;
       }
     }
     if(strcmp(argv[i], "-k") == 0) {
       if(i+1>=argc) {
         free(uname);
+        free(key_file);
         return 1;
       }
+      key_file = get_key_file(argv[i+1]);
+      if(!key_file) {
+        free(uname);
+        free(key_file);
+        return 1;
+      }
+      i+=1;
+      continue;
     }
+  }
+
+  if(!key_file) {
+    key_file = get_key_file("~/.ssh/id_rsa");
   }
 
   int sock;
@@ -145,10 +198,16 @@ int main(int argc, char *argv[]) {
   }
 
   //TODO change this to use the correct auth type
+  char *public_key_file = malloc(strlen(key_file) + 5);
+  sprintf(public_key_file, "%s.pub", key_file);
+
+  printf("%s\n", public_key_file);
+  printf("%s\n", key_file);
+
   uint8_t auth_ret = user_auth_publickey(&con, uname,
-      "rsa-sha2-256", "../.ssh/id_rsa.pub", "../.ssh/id_rsa");
+      "rsa-sha2-256", public_key_file, key_file);
   if(auth_ret) {
-    fprintf(stderr, "Could not complete auth for user %s", uname);
+    fprintf(stderr, "Could not complete auth for user %s\n", uname);
     free_connection(con);
     free(uname);
     free(v_c);
