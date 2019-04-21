@@ -382,15 +382,13 @@ int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t *ctr,
 
   //uint32_t in_len = get_byteArray_len(in);
   uint32_t in_len = in.len;
-  if(in_len%16 != 0) {
-  //if(in.len%16 != 0) {
+  if(in.len%16 != 0) {
     printf("Incorrect message length\n");
     return 2;
   }
   //uint32_t ctr_len = get_byteArray_len(ctr);
   uint32_t ctr_len = ctr->len;
-  if(ctr_len != 16) {
-  //if(ctr->len != 16) {
+  if(ctr->len != 16) {
     printf("Incorrect IV length\n");
     return 3;
   }
@@ -400,8 +398,8 @@ int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t *ctr,
   //out = create_byteArray(in_len);
   keys k = expand_key(key);
 
-  //for(uint32_t i=0; i<in.len/16; i++) {
-  for(uint32_t i=0; i<in_len/16; i++) {
+  for(uint32_t i=0; i<in.len/16; i++) {
+  //for(uint32_t i=0; i<in_len/16; i++) {
     state_matrix ctr_sm = byteArray_to_stateMatrix(*ctr);
     //state_matrix ctr_sm = byteArray_to_stateMatrix(ctr);
     state_matrix aes_out_sm = __aes__(ctr_sm, k);
@@ -409,8 +407,7 @@ int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t *ctr,
     //_byte_array_t aes_out = stateMatrix_to_byteArray(aes_out_sm);
     //uint32_t aes_out_len = get_byteArray_len(aes_out);
     uint32_t aes_out_len = aes_out.len;
-    for(uint32_t j=0; j<aes_out_len; j++) {
-    //for(uint32_t j=0; j<aes_out.len; j++) {
+    for(uint32_t j=0; j<aes_out.len; j++) {
       out->arr[16*i + j] = in.arr[16*i + j] ^ aes_out.arr[j];
     }
     free(aes_out.arr);
