@@ -1,58 +1,9 @@
-#include <inttypes.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>
-#include <ctype.h>
-#include "byte_array.h"
+#include "myssh.h"
 
 int inv_aes_cbc(const byte_array_t, const byte_array_t, byte_array_t*, byte_array_t*);
 void md5(const byte_array_t in, byte_array_t *);
 
-int base64_to_byteArray(const char *in, byte_array_t *out) {
-  if(strlen(in)%4!=0)
-    return 1;
-  out->arr = malloc((strlen(in)/4)*3);
-  uint32_t num = 0;
-  int padding = 0;
-  for(int j=0; j<strlen(in)/4; j++) {
-    for(int i=0; i<4; i++) {
-      //printf("4*j + i = %d\n", 4*j+i);
-      num<<=6;
-      if(isalpha(in[4*j + i]) && isupper(in[4*j + i])) {
-        num+=in[4*j + i] - 'A';
-      } else if(isalpha(in[4*j + i]) && islower(in[4*j + i])){
-        num+=in[4*j + i] - 'a' + 26;
-      } else if(isdigit(in[4*j + i])) {
-        num+=in[4*j + i] - '0' + 52;
-      } else if(in[4*j + i] == '+') {
-        num+=62;
-      } else if(in[4*j + i] == '/') {
-        num+=63;
-      } else if(in[4*j + i] == '=') {
-        padding++;
-      } else return 1;
-    }
-    //printf("These 4 characters: %"PRIu32"\n", num);
-    switch(padding) {
-      case 0: out->arr[(3*j) + 2] = num%256;
-      case 1: out->arr[(3*j) + 1] = (num>>8)%256;
-      case 2:
-      case 3: out->arr[(3*j)] = (num>>16)%256;
-      default: num=0;
-
-    }
-  }
-  out->len = (strlen(in)/4) * 3;
-  switch(padding) {
-    case 3: out->len--;
-    case 2: out->len--;
-    case 1: out->len--;
-  }
-  return 0;
-}
-
-int main(int argc, char *argv[]) {
+int get_priv_key(int argc, char *argv[]) {
 
   if(argc < 3) return 1;
 

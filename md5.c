@@ -1,8 +1,4 @@
-#include <stdio.h>
-#include <string.h>
-#include <inttypes.h>
-#include <stdlib.h>
-#include <math.h>
+#include "myssh.h"
 
 const uint32_t MD5_A = 0x67452301;
 const uint32_t MD5_B = 0xefcdab89;
@@ -11,10 +7,10 @@ const uint32_t MD5_D = 0x10325476;
 
 const uint8_t s[] = {7,12,17,22, 5,9,14,20, 4,11,16,23, 6,10,15,21};
 
-typedef struct byte_array_t {
+/*typedef struct byte_array_t {
   uint32_t len;
   uint8_t *arr;
-} byte_array_t;
+} byte_array_t;*/
 
 byte_array_t md5_pad_message(const byte_array_t in) {
   uint64_t message_len = ((uint64_t)in.len) * 8;
@@ -37,7 +33,7 @@ byte_array_t md5_pad_message(const byte_array_t in) {
   return out;
 }
 
-uint32_t bytes_to_int(const uint8_t *in) {
+uint32_t bytes_to_int_le(const uint8_t *in) {
   uint32_t ret = 0;
   for(int i=0; i<4; i++) {
     ret<<=8;
@@ -66,7 +62,7 @@ void md5(const byte_array_t in, byte_array_t *out) {
   for(uint32_t i = 0; i<padded_message.len/64; i++) {
     uint32_t *x = malloc(16*sizeof(uint32_t));
     for(int j=0; j<16; j++) {
-      x[j] = bytes_to_int(padded_message.arr + 64*i + 4*j);
+      x[j] = bytes_to_int_le(padded_message.arr + 64*i + 4*j);
     }
 
     uint32_t A = a0, B=b0, C=c0, D=d0;
