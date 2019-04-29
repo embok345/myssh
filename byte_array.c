@@ -57,6 +57,10 @@ _byte_array_t sub_byteArray(const _byte_array_t in, uint32_t offset, uint32_t le
   return out;
 }
 
+_byte_array_t str_to_byteArray(const char *in) {
+  return set_byteArray(strlen(in), in);
+}
+
 void free_byteArray(_byte_array_t bytes) {
   free(bytes->arr);
   free(bytes);
@@ -103,7 +107,7 @@ void add_len_byteArray(_byte_array_t bytes, uint32_t len) {
   if( len == 0 ) return;
   bytes->len += len;
   bytes->arr = realloc(bytes->arr, bytes->len);
-  memset(bytes->arr + bytes->len - len, 0, 1);
+  memset(bytes->arr + bytes->len - len, 0, len);
 }
 void byteArray_append_str(_byte_array_t bytes, const char *str) {
   add_len_byteArray(bytes, strlen(str));
@@ -245,8 +249,12 @@ int8_t byteArray_strncmp(const _byte_array_t bytes, const char *str,
 }
 
 uint8_t byteArray_equals(const _byte_array_t in1, const _byte_array_t in2) {
-  if(in1->len != in2->len) return 0;
-  if(!memcmp(in1->arr, in2->arr, in1->len)) return 0;
+  if(in1->len != in2->len) {
+    return 0;
+  }
+  if(memcmp(in1->arr, in2->arr, in1->len) != 0) {
+    return 0;
+  }
   return 1;
 }
 

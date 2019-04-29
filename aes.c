@@ -64,7 +64,6 @@ state_matrix zero_matrix() {
 }
 
 state_matrix add_round_key(state_matrix in, uint32_t keys[4]) {
-  //printf("%x, %x, %x, %x\n", keys[0], keys[1], keys[2], keys[3]);
   for(int i=0; i<4; i++) {
     in.m[0][i] ^= (keys[i]>>24)%256;
     in.m[1][i] ^= (keys[i]>>16)%256;

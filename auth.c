@@ -14,13 +14,9 @@ int user_auth_publickey(connection *con,
    * See rfc4253§10.
    */
   char *service_name = "ssh-userauth";
-  //byte_array_t service_request_message;
-  //service_request_message.len = 1;
-  //service_request_message.arr = malloc(1);
-  //service_request_message.arr[0] = SSH_MSG_SERVICE_REQUEST;
-  //string_into_byteArray(service_name, &service_request_message);
   _byte_array_t service_request_message = create_byteArray(1);
   set_byteArray_element(service_request_message, 0, SSH_MSG_SERVICE_REQUEST);
+  byteArray_append_len_str(service_request_message, service_name);
   packet service_request = build_packet(service_request_message, con);
   send_packet(service_request, con);
 
@@ -33,9 +29,8 @@ int user_auth_publickey(connection *con,
   uint32_t pak_len = get_byteArray_len(service_request_response.payload);
   _byte_array_t service_request_response_name =
       tail_byteArray(service_request_response.payload, 5);
+
   if( pak_len != strlen(service_name) + 5 ||
-      //strncmp(service_name, service_request_response.payload.arr + 5,
-      //  strlen(service_name)) != 0 ) {
       byteArray_strncmp(service_request_response.payload, service_name, 5,
         strlen(service_name)) != 0 ) {
     printf("Service request failed\n");
@@ -57,13 +52,7 @@ int user_auth_publickey(connection *con,
     return 1; //TODO probably want this to be more desriptive
 
   _byte_array_t userauth_request = create_byteArray(1);
-  //userauth_request.len = 1;
-  //userauth_request.arr = malloc(userauth_request.len);
-  //userauth_request.arr[0] = SSH_MSG_USERAUTH_REQUEST;
   set_byteArray_element(userauth_request, 0, SSH_MSG_USERAUTH_REQUEST);
-  //string_into_byteArray(user, &userauth_request);
-  //string_into_byteArray(service_name, &userauth_request);
-  //string_into_byteArray(method_name, &userauth_request);
   byteArray_append_len_str(userauth_request, user);
   byteArray_append_len_str(userauth_request, service_name);
   byteArray_append_len_str(userauth_request, method_name);
@@ -71,11 +60,8 @@ int user_auth_publickey(connection *con,
   //We want to save the position of the boolean value, to change it
   //when we send the signature
   uint32_t boolean_bit = get_byteArray_len(userauth_request);
-  //userauth_request.arr = realloc(userauth_request.arr, ++(userauth_request.len));
-  //userauth_request.arr[userauth_request.len - 1] = 0;
   byteArray_append_byte(userauth_request, 0);
 
-  //string_into_byteArray(algo_name, &userauth_request);
   byteArray_append_len_str(userauth_request, algo_name);
   //It is possible that the public key format would not be correct,
   //but it is for now.

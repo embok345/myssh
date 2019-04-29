@@ -17,6 +17,7 @@ _byte_array_t copy_byteArray(const _byte_array_t);
 _byte_array_t tail_byteArray(const _byte_array_t, uint32_t);
 _byte_array_t head_byteArray(const _byte_array_t, uint32_t);
 _byte_array_t sub_byteArray(const _byte_array_t, uint32_t, uint32_t);
+_byte_array_t str_to_byteArray(const char *);
 void resize_byteArray(_byte_array_t, uint32_t);
 void add_len_byteArray(_byte_array_t, uint32_t);
 void remove_len_byteArray(_byte_array_t, uint32_t);

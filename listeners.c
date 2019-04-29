@@ -25,10 +25,7 @@ void *channel_listener(void *args) {
 packet wait_for_channel_packet(connection *c, uint32_t channel) {
   packet received_packet;
   _byte_array_t codes = create_byteArray(10);
-  //codes.len = 10;
-  //codes.arr = malloc(codes.len);
   for(int i=0; i<10; i++) {
-    //codes.arr[i] = 91+i;
     set_byteArray_element(codes, i, 91+i);
   }
   while(1) {
@@ -67,17 +64,12 @@ packet wait_for_channel_packet(connection *c, uint32_t channel) {
 packet wait_for_packet(connection *c, int no_codes, ...) {
   packet received_packet;
   _byte_array_t codes;
-  printf("Waiting for packet\n");
   if(no_codes == 0) {
-    //codes.len = 256;
-    //codes.arr = malloc(codes.len);
     codes = create_byteArray(256);
     for(int i=0; i<256; i++) {
       set_byteArray_element(codes, i, i);
     }
   } else {
-    //codes.len = no_codes;
-    //codes.arr = malloc(no_codes);
     codes = create_byteArray(no_codes);
     va_list valist;
     va_start(valist, no_codes);
@@ -85,11 +77,10 @@ packet wait_for_packet(connection *c, int no_codes, ...) {
       set_byteArray_element(codes, i, va_arg(valist, int));
     va_end(valist);
   }
+
   while(1) {
     //Acquire the lock, and check if there is a packet present
-    printf("Getting lock\n");
     pthread_mutex_lock(&(c->pak.mutex));
-    printf("Got lock\n");
     while(!(c->pak.p)) {
       //Wait until a packet arrives
       pthread_cond_wait(&(c->pak.packet_present), &(c->pak.mutex));
@@ -242,26 +233,12 @@ void *reader_listener(void *arg) {
 
     //If there is a mac, get those blocks.
     if(c->mac_s2c) {
-      //read.len += c->mac_s2c->mac_output_size;
-      //read.arr = realloc(read.arr, read.len);
-      //if(recv(c->socket, read.arr + read.len - c->mac_s2c->mac_output_size,
-      //    c->mac_s2c->mac_output_size, 0) < c->mac_s2c->mac_output_size) {
-      //  printf("Received fewer than expected MAC bytes\n");
-      //  return NULL;
-      //}
-      //TODO we should check if the mac is the same
-      //c->pak.p->mac.len = c->mac_s2c->mac_output_size;
-      //c->pak.p->mac.arr = malloc(c->mac_s2c->mac_output_size);
-      //memcpy(c->pak.p->mac.arr, read.arr + read.len - c->mac_s2c->mac_output_size,
-      //    c->mac_s2c->mac_output_size);
       if(recv_byteArray(c->socket, &(c->pak.p->mac), c->mac_s2c->mac_output_size)
           < c->mac_s2c->mac_output_size) {
         printf("Received fewer than expected MAC bytes\n");
         return NULL;
       }
     } else {
-      //c->pak.p->mac.len = 0;
-      //c->pak.p->mac.arr = NULL;
       c->pak.p->mac = create_byteArray(0);
     }
 
