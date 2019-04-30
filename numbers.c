@@ -1,4 +1,4 @@
-#include "myssh.h"
+#include <inttypes.h>
 
 /* Main SSH message codes, as defined in rfc4250§4.1.2 */
 const uint8_t SSH_MSG_DISCONNECT = 1;

@@ -1,6 +1,12 @@
 #include "myssh.h"
 #include <pwd.h>
 #include <sys/types.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <pthread.h>
+#include <bignum.h>
+#include <netdb.h>
 
 const char *LOG_NAME = "/home/poulter/myssh/log.log";
 
@@ -185,7 +191,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  start_reader(&con);
+  pthread_t reader = start_reader(&con);
 
   uint8_t kex_ret = kex(&con, v_c, v_s);
   if(kex_ret) {
@@ -197,13 +203,10 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  //TODO change this to use the correct auth type
   char *public_key_file = malloc(strlen(key_file) + 5);
   sprintf(public_key_file, "%s.pub", key_file);
 
-  printf("%s\n", public_key_file);
-  printf("%s\n", key_file);
-
+  //TODO change this to use the correct auth type
   uint8_t auth_ret = user_auth_publickey(&con, uname,
       "rsa-sha2-256", public_key_file, key_file);
   if(auth_ret) {
@@ -215,12 +218,15 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  free(uname);
+  free(public_key_file);
+  free(key_file);
+
   uint32_t remote_channel;
   uint8_t open_channel_ret = open_channel(&con, 10, &remote_channel);
   if(open_channel_ret) {
     fprintf(stderr, "Could not open channel\n");
     free_connection(con);
-    free(uname);
     free(v_c);
     free(v_s);
     return 1;
@@ -233,7 +239,6 @@ int main(int argc, char *argv[]) {
 
   free_connection(con);
 
-  free(uname);
   free(v_c);
   free(v_s);
   return 0;
@@ -251,7 +256,7 @@ uint8_t version_exchange(connection *c, char **v_c, char **v_s) {
 
   //Initialise the server version string
   uint32_t v_s_len = 0;
-  *v_s = malloc(v_s_len + 1);
+  *v_s = malloc(v_s_len + 2);
   (*v_s)[0] = '\0';
   (*v_s)[1] = '\0';
   //Receive one character at a time

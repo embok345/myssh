@@ -1,4 +1,4 @@
-#include "myssh.h"
+#include <inttypes.h>
 
 const char *VERSION = "myssh_0.1.1";
 

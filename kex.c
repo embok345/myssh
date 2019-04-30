@@ -10,17 +10,22 @@ void compute_exchange_hash(void (*hash)(const byte_array_t, byte_array_t *),
   va_list valist;
   va_start(valist, no_objects);
 
-  byte_array_t prehash = {0, NULL};
+  byte_array_t prehash = create_byteArray(0);
 
   /* Go through each of the byte_arrays, and append it to the
    * previous ones. */
   for(int i=0; i<no_objects; i++) {
     byte_array_t obj = va_arg(valist, byte_array_t);
-    byteArray_into_byteArray(obj, &prehash);
+    byteArray_append_len_byteArray(prehash, obj);
   }
 
+  //print_byteArray_hex(prehash);
+
   hash(prehash, out);
-  free(prehash.arr);
+
+  //print_byteArray_hex(*out);
+
+  free_byteArray(prehash);
   va_end(valist);
 }
 
@@ -38,9 +43,6 @@ uint8_t kex_dh_14_rsa(connection *c,
     bn_t *K,            //=2^xy=e^y=f^x mod p, the shared secret
     byte_array_t *signature) { //The signature of the exchange hash
 
-  //pthread_t tid;
-  //pthread_create(&tid, NULL, listener_thread, (void *)c);
-
   /* Set up the numbers we need */
   bn_t p, g, x;
   bn_inits(4, &p, &g, &x, e);
@@ -53,15 +55,13 @@ uint8_t kex_dh_14_rsa(connection *c,
   bn_powmod(g, x, p, *e);
 
   /* Create the kexdh_init packet, which contains e */
-  byte_array_t kex_dh_init_payload;
-  kex_dh_init_payload.len = 1;
-  kex_dh_init_payload.arr = malloc(1);
-  kex_dh_init_payload.arr[0] = SSH_MSG_KEXDH_INIT;
-  bignum_into_mpint(*e, &kex_dh_init_payload);
+  byte_array_t kex_dh_init_payload = create_byteArray(0);
+  byteArray_append_byte(kex_dh_init_payload, SSH_MSG_KEXDH_INIT);
+  byteArray_append_len_bignum(kex_dh_init_payload, *e);
   packet kex_dh_init_pak = build_packet(kex_dh_init_payload, c);
-  free(kex_dh_init_payload.arr);
   send_packet(kex_dh_init_pak, c);
   free_pak(kex_dh_init_pak);
+  free_byteArray(kex_dh_init_payload);
 
   packet kex_dh_reply = wait_for_packet(c, 1, SSH_MSG_KEXDH_REPLY);
 
@@ -69,53 +69,68 @@ uint8_t kex_dh_14_rsa(connection *c,
   //TODO we should really check that we can access all of these things
 
   //The first object should be the public key
-  K_S->len = bytes_to_int(kex_dh_reply.payload.arr + 1);
-  K_S->arr = malloc(K_S->len);
-  memcpy(K_S->arr, kex_dh_reply.payload.arr+5,K_S->len);
+  uint32_t len_K_S = byteArray_to_int(kex_dh_reply.payload, 1);
+  *K_S = sub_byteArray(kex_dh_reply.payload, 5, len_K_S);
 
   //The modulus (n) and exponent are encoded in the public key
   //as mpints, so put them into bignums
   bn_t exponent, n;
   bn_inits(2, &exponent, &n);
   //TODO it would be nice if we could do these in one step
-  uint32_t len_exp = bytes_to_int(K_S->arr+11);
-  uint32_t len_n = bytes_to_int(K_S->arr+15+len_exp);
-  mpint_to_bignum(K_S->arr+15, len_exp, exponent);
-  mpint_to_bignum(K_S->arr+19+len_exp, len_n, n);
+  byte_array_t exponent_bytes = sub_byteArray(*K_S, 15,
+      byteArray_to_int(*K_S, 11));
+  byte_array_t n_bytes = sub_byteArray(*K_S, 19 + get_byteArray_len(exponent_bytes),
+      byteArray_to_int(*K_S, 15+get_byteArray_len(exponent_bytes)));
+  byteArray_to_bignum(exponent_bytes, exponent);
+  byteArray_to_bignum(n_bytes, n);
+
+  //bn_prnt_dec(exponent);
+  //bn_prnt_dec(n);
+
+  free_byteArray(exponent_bytes);
+  free_byteArray(n_bytes);
 
   //The second object should be f = 2^y mod p
-  uint32_t len_f = bytes_to_int(kex_dh_reply.payload.arr+5+K_S->len);
+  uint32_t len_f = byteArray_to_int(kex_dh_reply.payload,
+      5 + len_K_S);
   bn_init(f);
-  mpint_to_bignum(kex_dh_reply.payload.arr + 9 + K_S->len, len_f, *f);
+  byte_array_t f_bytes = sub_byteArray(kex_dh_reply.payload, 9 + len_K_S, len_f);
+  byteArray_to_bignum(f_bytes, *f);
+  free_byteArray(f_bytes);
+  //bn_prnt_dec(*f);
 
   //Now we have f, we can compute K = f^x mod p
   bn_init(K);
   bn_powmod(*f, x, p, *K);
 
   //The final entry of the packet should be the signature
-  uint32_t len_sig = bytes_to_int(kex_dh_reply.payload.arr+9+K_S->len+len_f);
-  uint8_t *sig = malloc(len_sig);
-  memcpy(sig, kex_dh_reply.payload.arr+13+K_S->len+len_f, len_sig);
-  uint32_t label_len = bytes_to_int(sig);
+  uint32_t len_sig = byteArray_to_int(kex_dh_reply.payload,
+      9 + len_f + len_K_S);
+  byte_array_t sig = sub_byteArray(kex_dh_reply.payload,
+      13+len_K_S+len_f, len_sig);
+  uint32_t label_len = byteArray_to_int(sig, 0);
   //TODO we should really check the name is as expected
 
   //Convert the signature to an int
-  uint32_t S_len = bytes_to_int(sig+4+label_len);
   bn_t s, em;
   bn_inits(2,&s,&em);
-  mpint_to_bignum(sig+8+label_len, S_len, s);
+  uint32_t s_len = byteArray_to_int(sig, 4+label_len);
+  byte_array_t s_bytes = sub_byteArray(sig, 8+label_len, s_len);
+  byteArray_to_bignum(s_bytes, s);
+  free_byteArray(s_bytes);
 
   //Raise the signature to the power exponent, which is the public rsa
   //exponent of the server
   bn_powmod(s, exponent, n, em);
   //then convert it back to a byte_array
-  signature->len = 0;
-  signature->arr = NULL;
-  bignum_to_byteArray_u(em, signature);
+  *signature = create_byteArray(0);
+  bignum_to_byteArray_u(em, *signature);
 
   bn_nukes(7, &em, &s, &exponent, &n, &p, &g, &x);
-  free(sig);
+  free_byteArray(sig);
   free_pak(kex_dh_reply);
+
+  return 0;
 }
 
 /* Gets the algorithms to use for kex etc, based on the byte array
@@ -126,70 +141,95 @@ uint8_t kex_dh_14_rsa(connection *c,
 //TODO we should really change this to use a byte_array_t, and
 //probably return the offset, and have the chosen algos as
 //an argument
-char **get_chosen_algos(uint8_t* arr, uint32_t *list_offset) {
+char **get_chosen_algos(const byte_array_t arr, uint32_t list_offset) {
 
   //There are 8 algorithm categories to chose in
   char **ret = malloc(8*sizeof(char *));
 
   //The first is kex
   //We get the length of the first name list
-  uint32_t name_list_len = bytes_to_int(arr + *list_offset);
+  //uint32_t name_list_len = bytes_to_int(arr + *list_offset);
+  uint32_t name_list_len = byteArray_to_int(arr, list_offset);
   //Pass it off to compare with the client kex algos
-  ret[0] = get_chosen_algo(arr + *list_offset + 4,
-      name_list_len, KEX_C_ALGOS, NO_KEX_C_ALGOS);
+  //ret[0] = get_chosen_algo(arr + *list_offset + 4,
+  //    name_list_len, KEX_C_ALGOS, NO_KEX_C_ALGOS);
+  byte_array_t name_list_bytes = sub_byteArray(arr, list_offset + 4, name_list_len);
+  ret[0] = get_chosen_algo(name_list_bytes, KEX_C_ALGOS, NO_KEX_C_ALGOS);
   //If that returned null, a match wasn't found, so we can't continue
   if(!ret[0]) return NULL;
   //Move the list onwards
-  *list_offset+=name_list_len + 4;
+  list_offset+=name_list_len + 4;
+  free_byteArray(name_list_bytes);
 
   //the next is public key algos
-  name_list_len = bytes_to_int(arr + *list_offset);
-  ret[1] = get_chosen_algo(arr + *list_offset + 4,
-      name_list_len, KEY_C_ALGOS, NO_KEY_C_ALGOS);
+  name_list_len = byteArray_to_int(arr, list_offset);
+  name_list_bytes = sub_byteArray(arr, list_offset + 4, name_list_len);
+  //ret[1] = get_chosen_algo(arr + *list_offset + 4,
+  //    name_list_len, KEY_C_ALGOS, NO_KEY_C_ALGOS);
+  ret[1] = get_chosen_algo(name_list_bytes, KEY_C_ALGOS, NO_KEY_C_ALGOS);
   if(!ret[1]) return NULL;
-  *list_offset+=name_list_len + 4;
+  list_offset+=name_list_len + 4;
+  free_byteArray(name_list_bytes);
 
   //client to server encryption algorithms
-  name_list_len = bytes_to_int(arr + *list_offset);
-  ret[2] = get_chosen_algo(arr + *list_offset + 4,
-      name_list_len, ENC_ALGOS, NO_ENC_ALGOS);
+  name_list_len = byteArray_to_int(arr, list_offset);
+  name_list_bytes = sub_byteArray(arr, list_offset + 4, name_list_len);
+  //ret[2] = get_chosen_algo(arr + *list_offset + 4,
+  //    name_list_len, ENC_ALGOS, NO_ENC_ALGOS);
+  ret[2] = get_chosen_algo(name_list_bytes, ENC_ALGOS, NO_ENC_ALGOS);
   if(!ret[2]) return NULL;
-  *list_offset+=name_list_len + 4;
+  list_offset+=name_list_len + 4;
+  free_byteArray(name_list_bytes);
 
   //server to client encryption algorithms
-  name_list_len = bytes_to_int(arr + *list_offset);
-  ret[3] = get_chosen_algo(arr + *list_offset + 4,
-      name_list_len, ENC_ALGOS, NO_ENC_ALGOS);
+  name_list_len = byteArray_to_int(arr, list_offset);
+  name_list_bytes = sub_byteArray(arr, list_offset + 4, name_list_len);
+  //ret[3] = get_chosen_algo(arr + *list_offset + 4,
+  //    name_list_len, ENC_ALGOS, NO_ENC_ALGOS);
+  ret[3] = get_chosen_algo(name_list_bytes, ENC_ALGOS, NO_ENC_ALGOS);
   if(!ret[3]) return NULL;
-  *list_offset+=name_list_len + 4;
+  list_offset+=name_list_len + 4;
+  free_byteArray(name_list_bytes);
 
   //client to server mac algorithms
-  name_list_len = bytes_to_int(arr + *list_offset);
-  ret[4] = get_chosen_algo(arr + *list_offset + 4,
-      name_list_len, MAC_ALGOS, NO_MAC_ALGOS);
+  name_list_len = byteArray_to_int(arr, list_offset);
+  name_list_bytes = sub_byteArray(arr, list_offset + 4, name_list_len);
+  //ret[4] = get_chosen_algo(arr + *list_offset + 4,
+  //    name_list_len, MAC_ALGOS, NO_MAC_ALGOS);
+  ret[4] = get_chosen_algo(name_list_bytes, MAC_ALGOS, NO_MAC_ALGOS);
   if(!ret[4]) return NULL;
-  *list_offset+=name_list_len + 4;
+  list_offset+=name_list_len + 4;
+  free_byteArray(name_list_bytes);
 
   //server to client mac algorithms
-  name_list_len = bytes_to_int(arr + *list_offset);
-  ret[5] = get_chosen_algo(arr + *list_offset + 4,
-      name_list_len, MAC_ALGOS, NO_MAC_ALGOS);
+  name_list_len = byteArray_to_int(arr, list_offset);
+  name_list_bytes = sub_byteArray(arr, list_offset + 4, name_list_len);
+  //ret[5] = get_chosen_algo(arr + *list_offset + 4,
+  //    name_list_len, MAC_ALGOS, NO_MAC_ALGOS);
+  ret[5] = get_chosen_algo(name_list_bytes, MAC_ALGOS, NO_MAC_ALGOS);
   if(!ret[5]) return NULL;
-  *list_offset+=name_list_len + 4;
+  list_offset+=name_list_len + 4;
+  free_byteArray(name_list_bytes);
 
   //client to server compression algorithms
-  name_list_len = bytes_to_int(arr + *list_offset);
-  ret[6]= get_chosen_algo(arr + *list_offset + 4,
-      name_list_len, COM_ALGOS, NO_COM_ALGOS);
+  name_list_len = byteArray_to_int(arr, list_offset);
+  name_list_bytes = sub_byteArray(arr, list_offset + 4, name_list_len);
+  //ret[6]= get_chosen_algo(arr + *list_offset + 4,
+  //    name_list_len, COM_ALGOS, NO_COM_ALGOS);
+  ret[6] = get_chosen_algo(name_list_bytes, COM_ALGOS, NO_COM_ALGOS);
   if(!ret[6]) return NULL;
-  *list_offset+=name_list_len + 4;
+  list_offset+=name_list_len + 4;
+  free_byteArray(name_list_bytes);
 
   //server to client compression algorithms
-  name_list_len = bytes_to_int(arr + *list_offset);
-  ret[7] = get_chosen_algo(arr + *list_offset + 4,
-      name_list_len, COM_ALGOS, NO_COM_ALGOS);
+  name_list_len = byteArray_to_int(arr, list_offset);
+  name_list_bytes = sub_byteArray(arr, list_offset + 4, name_list_len);
+  //ret[7] = get_chosen_algo(arr + *list_offset + 4,
+  //    name_list_len, COM_ALGOS, NO_COM_ALGOS);
+  ret[7] = get_chosen_algo(name_list_bytes, COM_ALGOS, NO_COM_ALGOS);
   if(!ret[7]) return NULL;
-  *list_offset+=name_list_len + 4;
+  // *list_offset+=name_list_len + 4;
+  free_byteArray(name_list_bytes);
 
   return ret;
 }
@@ -199,12 +239,12 @@ char **get_chosen_algos(uint8_t* arr, uint32_t *list_offset) {
  * client list which is also on the server list. If there are none in
  * common, return NULL. */
 //TODO note that the kex algorithm is chosen in a slightly different way
-char *get_chosen_algo(uint8_t *arr, uint32_t len,
+char *get_chosen_algo(byte_array_t arr,
                       const char **allowable_algos,
                       uint32_t no_allowable_algos) {
 
   //If either of the lists is empty, there is no hope of finding a match
-  if(len == 0 || no_allowable_algos == 0) return NULL;
+  if(get_byteArray_len(arr) == 0 || no_allowable_algos == 0) return NULL;
 
   /* Split up the server name list into its separate names */
   //As the length is non-zero, there is at least one algo
@@ -212,13 +252,16 @@ char *get_chosen_algo(uint8_t *arr, uint32_t len,
   //The first name starts on the 0th character
   uint32_t word_start = 0;
   char **s_algos = malloc(no_s_algos*sizeof(char*));
+  uint32_t len = get_byteArray_len(arr);
   for(int i=0; i<len; i++) {
     //If the current character is ',', we have reached the end of
     //the name, so copy the previous name.
-    if(arr[i] == ',') {
+    //if(arr[i] == ',') {
+    if(get_byteArray_element(arr, i) == ',') {
       s_algos[no_s_algos-1] = malloc(i-word_start+1);
-      memcpy(s_algos[no_s_algos-1], arr+word_start, i-word_start);
-      s_algos[no_s_algos-1][i-word_start] = '\0';
+      //memcpy(s_algos[no_s_algos-1], arr+word_start, i-word_start);
+      //s_algos[no_s_algos-1][i-word_start] = '\0';
+      byteArray_strncpy(s_algos[no_s_algos-1], arr, word_start, i-word_start);
       //The next name starts on the next character
       word_start = i+1;
       //We have at least one more name
@@ -227,8 +270,9 @@ char *get_chosen_algo(uint8_t *arr, uint32_t len,
   }
   //Once we reach the end, there is one final name
   s_algos[no_s_algos-1] = malloc(len-word_start+1);
-  memcpy(s_algos[no_s_algos-1], arr+word_start, len-word_start);
-  s_algos[no_s_algos-1][len - word_start] = '\0';
+  //memcpy(s_algos[no_s_algos-1], arr+word_start, len-word_start);
+  //s_algos[no_s_algos-1][len - word_start] = '\0';
+  byteArray_strncpy(s_algos[no_s_algos-1], arr, word_start, len-word_start);
 
   /* Search to find a match */
   char *chosen_algo = NULL;
@@ -269,7 +313,8 @@ uint8_t kex(connection *c, const char *v_c, const char *v_s) {
   //Get the algorithms to use. These are the first client choice
   //which also occurs as a server choice.
   //TODO really we should pass the algo list which we sent as well.
-  char **chosen_algos = get_chosen_algos(kex_init_s.payload.arr, &list_offset);
+  //char **chosen_algos = get_chosen_algos(kex_init_s.payload.arr, &list_offset);
+  char **chosen_algos = get_chosen_algos(kex_init_s.payload, list_offset);
   if(!chosen_algos) {
     printf("Could not determine algorithms to use\n");
     return 1; //TODO return an error code
@@ -295,7 +340,6 @@ uint8_t kex(connection *c, const char *v_c, const char *v_s) {
     printf("Public key algorithm unsupported: %s\n", chosen_algos[1]);
     return 1;//TODO error code
   }
-
 
   /* Set the encryption algorithms */
   enc_struct *new_enc_c2s, *new_enc_s2c;
@@ -383,48 +427,50 @@ uint8_t kex(connection *c, const char *v_c, const char *v_s) {
   kex_dh_14_rsa(c, &host_key, &e, &f, &K, &signature);
   //TODO obviously this would be different if using different algos.
 
+  //print_byteArray_hex(signature);
+
   /*Compute the exchange hash, as in rfc4253§8*/
   byte_array_t vc, vs, ic, is, e_b, f_b, K_b;
-  vc.len = strlen(v_c)-2;
-  vs.len = strlen(v_s)-2;
-  vc.arr = malloc(vc.len);
-  memcpy(vc.arr, v_c, vc.len);
-  vs.arr = malloc(vs.len);
-  memcpy(vs.arr, v_s, vs.len);
+  vc = set_byteArray(strlen(v_c)-2, v_c);
+  vs = set_byteArray(strlen(v_s)-2, v_s);
   ic = kex_init_c.payload;
   is = kex_init_s.payload;
-  bignum_to_byteArray(e, &e_b);
-  bignum_to_byteArray(f, &f_b);
-  bignum_to_byteArray(K, &K_b);
+  e_b = create_byteArray(0);
+  f_b = create_byteArray(0);
+  K_b = create_byteArray(0);
+  bignum_to_byteArray(e, e_b);
+  bignum_to_byteArray(f, f_b);
+  bignum_to_byteArray(K, K_b);
   //TODO the things going in to the hash may be different too.
 
-  byte_array_t *exchange_hash = malloc(sizeof(byte_array_t));
-
-  compute_exchange_hash(kex_hash_fun, exchange_hash, 8, vc, vs, ic, is,
+  byte_array_t exchange_hash;
+  compute_exchange_hash(kex_hash_fun, &exchange_hash, 8, vc, vs, ic, is,
       host_key, e_b, f_b, K_b);
 
-  free(vc.arr);
-  free(vs.arr);
-  free(host_key.arr);
-  free(e_b.arr);
-  free(f_b.arr);
-  free(K_b.arr);
+  free_byteArray(vc);
+  free_byteArray(vs);
+  free_byteArray(host_key);
+  free_byteArray(e_b);
+  free_byteArray(f_b);
+  free_byteArray(K_b);
 
   /*Compute the signature, and make sure it is the same as the one
    *received from the server */
   byte_array_t computed_signature;
-  key_hash_fun(*exchange_hash, &computed_signature);
-  for(int i=0; i<computed_signature.len; i++) {
-    if(computed_signature.arr[i] !=
-        signature.arr[signature.len-computed_signature.len+i])
-      return 1;
+  key_hash_fun(exchange_hash, &computed_signature);
+  byte_array_t sig_tail = tail_byteArray(signature,
+      get_byteArray_len(signature) - get_byteArray_len(computed_signature));
+  if(!byteArray_equals(sig_tail, computed_signature)) {
+    printf("Signatures don't match\n");
+    return 1;
   }
   //TODO we shouldn't do it in this way, we should encode the computed
   //signature properly with ASN.1, then check they are the same (I think
   //it says that somewhere in the specs)
 
-  free(computed_signature.arr);
-  free(signature.arr);
+  free_byteArray(computed_signature);
+  free_byteArray(sig_tail);
+  free_byteArray(signature);
   for(int i=0; i<8; i++) {
     free(chosen_algos[i]);
   }
@@ -436,73 +482,65 @@ uint8_t kex(connection *c, const char *v_c, const char *v_s) {
    * HASH(K||exchange_hash||char||c->session_id), where char
    * ranges from 'A' to 'F', and K is encoded as mpint, the
    * rest as bytes */
-  byte_array_t prehash = {0, NULL};
-  bignum_into_mpint(K, &prehash);
-  prehash.len += exchange_hash->len;
-  prehash.arr = realloc(prehash.arr, prehash.len);
-  memcpy(prehash.arr + prehash.len - exchange_hash->len, exchange_hash->arr,
-      exchange_hash->len);
-  uint32_t character_pos = prehash.len;
-  prehash.len+=1;
+  byte_array_t prehash = create_byteArray(0);
+  byteArray_append_len_bignum(prehash, K);
+  byteArray_append_byteArray(prehash, exchange_hash);
+  uint32_t character_pos = get_byteArray_len(prehash);
+  byteArray_append_byte(prehash, 'A');
   //If we don't have a session_id, use the exchange_hash, as it
   //will become the session_id
   if(!c->session_id) {
-    prehash.len += exchange_hash->len;
-    prehash.arr = realloc(prehash.arr, prehash.len);
-    memcpy(prehash.arr + prehash.len - exchange_hash->len, exchange_hash->arr,
-        exchange_hash->len);
+    byteArray_append_byteArray(prehash, exchange_hash);
   } else {
-    prehash.len += c->session_id->len;
-    prehash.arr = realloc(prehash.arr, prehash.len);
-    memcpy(prehash.arr + prehash.len - c->session_id->len, c->session_id->arr,
-        c->session_id->len);
+    byteArray_append_byteArray(prehash, c->session_id);
   }
 
-  prehash.arr[character_pos] = 'A';
   kex_hash_fun(prehash, &(new_enc_c2s->iv));
   //Resize the output of the hash to the correct size.
   if(new_enc_c2s->block_size > kex_hash_output_len) {
     //TODO enlarge the iv if the hash is too short
   } else {
-    new_enc_c2s->iv.len = new_enc_c2s->block_size;
+    resize_byteArray(new_enc_c2s->iv, new_enc_c2s->block_size);
   }
 
-  prehash.arr[character_pos] = 'B';
+  //prehash.arr[character_pos] = 'B';
+  set_byteArray_element(prehash, character_pos, 'B');
   kex_hash_fun(prehash, &(new_enc_s2c->iv));
   if(new_enc_s2c->block_size > kex_hash_output_len) {
     //TODO --"--
   } else {
-    new_enc_s2c->iv.len = new_enc_s2c->block_size;
+    resize_byteArray(new_enc_s2c->iv, new_enc_s2c->block_size);
   }
 
-  prehash.arr[character_pos] = 'C';
+  set_byteArray_element(prehash, character_pos, 'C');
   kex_hash_fun(prehash, &(new_enc_c2s->key));
   if(new_enc_c2s->block_size > kex_hash_output_len) {
     //TODO --"--
   } else {
-    new_enc_c2s->key.len = new_enc_c2s->key_size;
+    resize_byteArray(new_enc_c2s->key, new_enc_c2s->key_size);
   }
 
-  prehash.arr[character_pos] = 'D';
+  set_byteArray_element(prehash, character_pos, 'D');
   kex_hash_fun(prehash, &(new_enc_s2c->key));
   if(new_enc_s2c->block_size > kex_hash_output_len) {
     //TODO --"--
   } else {
-    new_enc_s2c->key.len = new_enc_s2c->key_size;
+    resize_byteArray(new_enc_s2c->key, new_enc_s2c->key_size);
   }
 
-  prehash.arr[character_pos] = 'E';
+  set_byteArray_element(prehash, character_pos, 'E');
   kex_hash_fun(prehash, &(new_mac_c2s->key));
-  prehash.arr[character_pos] = 'F';
+  set_byteArray_element(prehash, character_pos, 'F');
   kex_hash_fun(prehash, &(new_mac_s2c->key));
   //TODO maybe we want to change the length of the mac keys?
 
   /* Send the NEWKEYS message */
   uint8_t new_keys_bytes[] = {SSH_MSG_NEWKEYS};
-  byte_array_t new_keys = {1, new_keys_bytes};
+  byte_array_t new_keys = set_byteArray(1, new_keys_bytes);
   packet new_keys_pak = build_packet(new_keys, c);
   send_packet(new_keys_pak, c);
   free_pak(new_keys_pak);
+  free_byteArray(new_keys);
 
   //Wait to receive the new keys packet
   //We can't just call wait_for_packet, as we need to retain the mutex
@@ -514,7 +552,7 @@ uint8_t kex(connection *c, const char *v_c, const char *v_s) {
       pthread_cond_wait(&(c->pak.packet_present), &(c->pak.mutex));
     }
     //We now own the lock, and a packet is present
-    if(c->pak.p->payload.arr[0] == SSH_MSG_NEWKEYS) {
+    if(get_byteArray_element(c->pak.p->payload,0) == SSH_MSG_NEWKEYS) {
       //If we get the new keys packet, break out
       free_pak(*(c->pak.p));
       free(c->pak.p);
@@ -547,6 +585,6 @@ uint8_t kex(connection *c, const char *v_c, const char *v_s) {
   pthread_mutex_unlock(&(c->pak.mutex));
 
   bn_nukes(3, &e, &f, &K);
-  free(prehash.arr);
+  free_byteArray(prehash);
   return 0;
 }

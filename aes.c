@@ -1,4 +1,4 @@
-#include "myssh.h"
+#include "byte_array.h"
 
 //TODO comment
 
@@ -55,10 +55,10 @@ state_matrix zero_matrix() {
       m.m[i][j] = 0;
     }
   }
+  return m;
 }
 
 state_matrix add_round_key(state_matrix in, uint32_t keys[4]) {
-  //printf("%x, %x, %x, %x\n", keys[0], keys[1], keys[2], keys[3]);
   for(int i=0; i<4; i++) {
     in.m[0][i] ^= (keys[i]>>24)%256;
     in.m[1][i] ^= (keys[i]>>16)%256;
@@ -201,9 +201,10 @@ uint32_t rot_word(uint32_t in) {
   return out;
 }
 
+//keys expand_key(const byte_array_t k) {
 keys expand_key(const byte_array_t k) {
-  //uint32_t k_len = get_byteArray_len(k);
-  uint32_t k_len = k.len;
+  uint32_t k_len = get_byteArray_len(k);
+  //uint32_t k_len = k.len;
   keys ks;
   ks.key_size = k_len;
   ks.w = NULL;
@@ -220,8 +221,8 @@ keys expand_key(const byte_array_t k) {
     for(int j=0; j<4; j++) {
       ks.w[i] <<= 8;
       if(4*i + j < k_len)
-        ks.w[i] += (uint32_t)k.arr[4*i+j];
-        //ks.w[i] += (uint32_t)get_byteArray_element(k, 4*i+j);
+        //ks.w[i] += (uint32_t)k.arr[4*i+j];
+        ks.w[i] += (uint32_t)get_byteArray_element(k, 4*i+j);
     }
     i++;
   }
@@ -299,159 +300,139 @@ state_matrix __inv_aes__(state_matrix in, keys k) {
   return state;
 }
 
+//state_matrix byteArray_to_stateMatrix(const byte_array_t arr) {
 state_matrix byteArray_to_stateMatrix(const byte_array_t arr) {
   state_matrix out;
   for(int i=0; i<4; i++) {
     for(int j=0; j<4; j++) {
-      if(4*j+i >= arr.len)
+      /*if(4*j+i >= arr.len)
         out.m[i][j] = 0;
       else
-        out.m[i][j] = arr.arr[4*j+i];
-      //out.m[i][j] = get_byteArray_element(arr, 4*j + i);
+        out.m[i][j] = arr.arr[4*j+i];*/
+      out.m[i][j] = get_byteArray_element(arr, 4*j + i);
     }
   }
   return out;
 }
 
+//byte_array_t stateMatrix_to_byteArray(state_matrix in) {
 byte_array_t stateMatrix_to_byteArray(state_matrix in) {
-  //byte_array_t ret = create_byteArray(16);
-  byte_array_t ret;
-  ret.len = 16;
-  ret.arr = malloc(16);
+  byte_array_t ret = create_byteArray(16);
+  //byte_array_t ret;
+  //ret.len = 16;
+  //ret.arr = malloc(16);
   for(int i=0; i<4; i++) {
     for(int j=0; j<4; j++) {
-      ret.arr[4*j+i] = in.m[i][j];
-      //set_byteArray_element(ret, 4*j+i, in.m[i][j]);
+      //ret.arr[4*j+i] = in.m[i][j];
+      set_byteArray_element(ret, 4*j+i, in.m[i][j]);
     }
   }
   return ret;
 }
 
-void increment_byte_array(byte_array_t in) {
+//void increment_byte_array(byte_array_t in) {
+/*void increment_byte_array(byte_array_t in) {
   uint32_t pos = in.len-1;
   in.arr[pos] = (in.arr[pos]) + 1;
   while(in.arr[pos] == 0 && pos>0) {
     pos--;
     (in.arr[pos])++;
   }
-}
+}*/
 
-int inv_aes_cbc(const byte_array_t in, const byte_array_t key, byte_array_t *iv,
+int inv_aes_cbc(const byte_array_t in, const byte_array_t key, byte_array_t iv,
     byte_array_t *out) {
-  if(key.len != 16 && key.len != 24 && key.len !=32) {
+  uint32_t key_len = get_byteArray_len(key);
+  if(key_len != 16 && key_len != 24 && key_len !=32) {
     printf("Invalid key length\n");
     return 1;
   }
-  if(in.len%16 != 0) {
+  uint32_t in_len = get_byteArray_len(in);
+  if(in_len%16 != 0) {
     printf("Incorrect message length\n");
     return 2;
   }
-  if(iv->len != 16) {
+  uint32_t iv_len = get_byteArray_len(iv);
+  if(iv_len != 16) {
     printf("Incorrect IV length\n");
     return 3;
   }
+  //out->len = in.len;
+  //out->arr = malloc(out->len);
+  *out = create_byteArray(in_len);
 
-  out->len = in.len;
-  out->arr = malloc(out->len);
   keys k = expand_key(key);
 
   byte_array_t block;
-  block.len = 16;
-  block.arr = malloc(16);
-  for(uint32_t i=0; i<in.len/16; i++) {
+  //block.len = 16;
+  //block.arr = malloc(16);
+  for(uint32_t i=0; i<in_len/16; i++) {
     //state_matrix iv_sm = byteArray_to_stateMatrix(*iv);
-    memcpy(block.arr, in.arr + i*16, 16);
+    //memcpy(block.arr, in.arr + i*16, 16);
+    block = sub_byteArray(in, i*16, 16);
     state_matrix block_sm = byteArray_to_stateMatrix(block);
     state_matrix aes_out_sm = __inv_aes__(block_sm, k);
     byte_array_t aes_out = stateMatrix_to_byteArray(aes_out_sm);
-    for(uint32_t j=0; j<aes_out.len; j++) {
-      out->arr[16*i + j] = iv->arr[j] ^ aes_out.arr[j];
+    uint32_t aes_out_len = get_byteArray_len(aes_out);
+    for(uint32_t j=0; j<aes_out_len; j++) {
+      //out->arr[16*i + j] = iv->arr[j] ^ aes_out.arr[j];
+      set_byteArray_element(*out, 16*i + j,
+          get_byteArray_element(iv, j) ^ get_byteArray_element(aes_out, j));
     }
-    free(aes_out.arr);
-    memcpy(iv->arr, block.arr, 16);
+    //memcpy(iv->arr, block.arr, 16);
+    clone_byteArray(block, iv);
+
+    free_byteArray(aes_out);
+    free_byteArray(block);
   }
-  free(block.arr);
+  free(k.w);
 }
 
-int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t *ctr,
+int aes_ctr(const byte_array_t in, const byte_array_t key, byte_array_t ctr,
     byte_array_t *out) {
-  if(key.len != 16 && key.len != 24 && key.len !=32) {
+  uint32_t key_len = get_byteArray_len(key);
+  if(key_len != 16 && key_len != 24 && key_len !=32) {
     printf("Invalid key length\n");
     return 1;
   }
 
-  //uint32_t in_len = get_byteArray_len(in);
-  uint32_t in_len = in.len;
-  if(in.len%16 != 0) {
+  uint32_t in_len = get_byteArray_len(in);
+  //uint32_t in_len = in.len;
+  if(in_len%16 != 0) {
     printf("Incorrect message length\n");
     return 2;
   }
-  //uint32_t ctr_len = get_byteArray_len(ctr);
-  uint32_t ctr_len = ctr->len;
-  if(ctr->len != 16) {
+  uint32_t ctr_len = get_byteArray_len(ctr);
+  //uint32_t ctr_len = ctr->len;
+  if(ctr_len != 16) {
     printf("Incorrect IV length\n");
     return 3;
   }
 
-  out->len = in.len;
-  out->arr = malloc(out->len);
-  //out = create_byteArray(in_len);
-  keys k = expand_key(key);
+  *out = create_byteArray(in_len);
 
-  for(uint32_t i=0; i<in.len/16; i++) {
-  //for(uint32_t i=0; i<in_len/16; i++) {
-    state_matrix ctr_sm = byteArray_to_stateMatrix(*ctr);
-    //state_matrix ctr_sm = byteArray_to_stateMatrix(ctr);
+  keys k = expand_key(key);
+  if(!k.w) return 4;
+
+  //for(uint32_t i=0; i<in.len/16; i++) {
+  for(uint32_t i=0; i<in_len/16; i++) {
+    //state_matrix ctr_sm = byteArray_to_stateMatrix(*ctr);
+    state_matrix ctr_sm = byteArray_to_stateMatrix(ctr);
     state_matrix aes_out_sm = __aes__(ctr_sm, k);
+    //byte_array_t aes_out = stateMatrix_to_byteArray(aes_out_sm);
     byte_array_t aes_out = stateMatrix_to_byteArray(aes_out_sm);
-    //_byte_array_t aes_out = stateMatrix_to_byteArray(aes_out_sm);
-    //uint32_t aes_out_len = get_byteArray_len(aes_out);
-    uint32_t aes_out_len = aes_out.len;
-    for(uint32_t j=0; j<aes_out.len; j++) {
-      out->arr[16*i + j] = in.arr[16*i + j] ^ aes_out.arr[j];
+    uint32_t aes_out_len = get_byteArray_len(aes_out);
+    for(uint32_t j=0; j<aes_out_len; j++) {
+    //for(uint32_t j=0; j<aes_out.len; j++) {
+      //out->arr[16*i + j] = in.arr[16*i + j] ^ aes_out.arr[j];
+      set_byteArray_element(*out, 16*i + j,
+          get_byteArray_element(in, 16*i+j) ^ get_byteArray_element(aes_out, j));
     }
-    free(aes_out.arr);
-    increment_byte_array(*ctr);
+    free_byteArray(aes_out);
+    increment_byteArray(ctr);
   }
 
   free(k.w);
 
   return 0;
 }
-/*
-int main() {
-  //uint8_t plaintext[16] = {0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x99,
-  //                       0xaa,0xbb,0xcc,0xdd,0xee,0xff};
-  //uint8_t key[4*KEY_SIZE] = {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
-  //                           0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f};
-  //uint8_t plaintext_b[16] = {0x32,0x43,0xf6,0xa8,0x88,0x5a,0x30,0x8d,0x31,0x31,0x98,0xa2,0xe0,0x37,0x07,0x34};
-  //uint8_t key_b[16] = {0x2b,0x7e,0x15,0x16,0x28,0xae,0xd2,0xa6,0xab,0xf7,0x15,0x88,0x09,0xcf,0x4f,0x3c};
-
-  byte_array_t key;
-  key.len = 32;
-  key.arr = malloc(key.len);
-  for(int i=0; i<key.len; i++) {
-    key.arr[i] = i;
-  }
-
-  byte_array_t plaintext;
-  plaintext.len = 16;
-  plaintext.arr = malloc(plaintext.len);
-  for(int i=0; i<plaintext.len; i++) {
-    plaintext.arr[i] = i + (i*16);
-  }
-
-  state_matrix input = byteArray_to_stateMatrix(plaintext);
-  keys ks = expand_key(key);
-  state_matrix enc = __aes__(input, ks);
-  byte_array_t enc_text = stateMatrix_to_byteArray(enc);
-  for(int i=0; i<enc_text.len; i++) {
-    printf("%x", enc_text.arr[i]);
-  }
-  printf("\n");
-  byte_array_t dec_text = stateMatrix_to_byteArray(__inv_aes__(enc, ks));
-  for(int i=0; i<dec_text.len; i++) {
-    printf("%x", dec_text.arr[i]);
-  }
-  printf("\n");
-}*/
