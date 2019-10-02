@@ -1,4 +1,8 @@
+#ifndef STRUCTS_H
+#define STRUCTS_H
+
 #include "byte_array.h"
+#include <pthread.h>
 
 typedef struct mac_struct {
   void (*hash)(const byte_array_t, byte_array_t *);
@@ -60,3 +64,5 @@ void free_enc(enc_struct *);
 void free_mac(mac_struct *);
 connection create_connection_struct(int);
 void free_connection(connection);
+
+#endif

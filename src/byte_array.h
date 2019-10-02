@@ -7,7 +7,6 @@
 
 #ifdef USE_BIGNUM
 #include <bignum.h>
-typedef bignum* bn_t;
 #endif
 
 typedef struct byte_array* byte_array_t;
@@ -43,6 +42,10 @@ void byteArray_append_long_le(byte_array_t, uint64_t);
 uint32_t byteArray_to_int(const byte_array_t, uint32_t);
 uint32_t byteArray_to_int_le(const byte_array_t, uint32_t);
 int base64_to_byteArray(const char *, byte_array_t);
+
+char **get_byteArray_nameList(const byte_array_t, uint32_t,
+    uint32_t*, uint32_t*);
+char *get_byteArray_str(const byte_array_t, uint32_t);
 
 void byteArray_strncpy(char *, byte_array_t, uint32_t, uint32_t);
 

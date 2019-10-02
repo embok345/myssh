@@ -1,6 +1,26 @@
 #include "myssh_common.h"
 #include <termio.h>
 
+int echoOn() {
+  struct termios old = {0};
+  if(tcgetattr(0, &old) < 0)
+    return 1;
+  old.c_lflag |= ECHO;
+  if(tcsetattr(0, TCSANOW, &old) < 0)
+    return 1;
+  return 0;
+}
+
+int echoOff() {
+  struct termios old = {0};
+  if(tcgetattr(0, &old) < 0)
+    return 1;
+  old.c_lflag &= ~ECHO;
+  if(tcsetattr(0, TCSANOW, &old) < 0)
+    return 1;
+  return 0;
+}
+
 char getch() {
   char buf = 0;
   struct termios old = {0};

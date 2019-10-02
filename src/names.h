@@ -1,6 +1,8 @@
 #ifndef MYSSH_NAMES_H
 #define MYSSH_NAMES_H
 
+#include <inttypes.h>
+
 extern const char *VERSION;
 
 extern const char *NONE;
@@ -25,5 +27,10 @@ extern const char *MAC_ALGOS[];
 
 extern const uint32_t NO_COM_ALGOS;
 extern const char *COM_ALGOS[];
+
+extern const char *AUTH_PUBKEY;
+extern const char *AUTH_PASSWD;
+extern const char *AUTH_HOST;
+extern const char *AUTH_INTERACTIVE;
 
 #endif

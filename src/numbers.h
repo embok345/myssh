@@ -1,6 +1,8 @@
 #ifndef MYSSH_NUMBERS_H
 #define MYSSH_NUMBERS_H
 
+#include <inttypes.h>
+
 /* Main SSH message codes, as defined in rfc4250 */
 extern const uint8_t SSH_MSG_DISCONNECT;
 extern const uint8_t SSH_MSG_IGNORE;
@@ -17,6 +19,8 @@ extern const uint8_t SSH_MSG_USERAUTH_FAILURE;
 extern const uint8_t SSH_MSG_USERAUTH_SUCCESS;
 extern const uint8_t SSH_MSG_USERAUTH_BANNER;
 extern const uint8_t SSH_MSG_USERAUTH_PK_OK;
+extern const uint8_t SSH_MSG_USERAUTH_INFO_REQUEST;
+extern const uint8_t SSH_MSG_USERAUTH_INFO_RESPONSE;
 extern const uint8_t SSH_MSG_GLOBAL_REQUEST;
 extern const uint8_t SSH_MSG_REQUEST_SUCCESS;
 extern const uint8_t SSH_MSG_REQUEST_FAILURE;
@@ -55,5 +59,6 @@ extern const uint8_t DH_14_BLOCKS[256];
 
 extern const uint8_t MYSSH_AUTH_SUCCESS;
 extern const uint8_t MYSSH_AUTH_FAIL;
+extern const uint8_t MYSSH_AUTH_REDO;
 
 #endif

@@ -243,7 +243,7 @@ void byteArray_append_bignum(byte_array_t bytes, const bn_t num) {
 }
 
 void byteArray_to_bignum(const byte_array_t in, bn_t out) {
-  bn_resize(out, in->len);
+  if(!bn_resize(out, in->len)) return;
   for(int i=0; i<in->len; i++) {
     bn_setBlock(out, i, in->arr[in->len - i - 1]);
   }
@@ -343,4 +343,56 @@ uint32_t recv_byteArray(int socket, byte_array_t *bytes, uint32_t len) {
 
 uint32_t send_byteArray(int socket, const byte_array_t bytes) {
   return send(socket, bytes->arr, bytes->len, 0);
+}
+
+char **get_byteArray_nameList(const byte_array_t arr, uint32_t index,
+    uint32_t *len, uint32_t *noNames) {
+  *len = byteArray_to_int(arr, index);
+  if(index + 4 + *len >= arr->len ) {
+    return NULL;
+  }
+  char *tmp = malloc(*len + 1);
+  memcpy(tmp, arr->arr + index + 4, *len);
+  tmp[*len] = '\0';
+  char **ret = NULL;
+  *noNames = 0;
+  uint32_t startIndex = 0;
+  for(uint32_t i = 0; i<*len; i++) {
+    if(tmp[i] == ',') {
+      if(i == 0 || i == *len - 1 || startIndex == i ||
+         !(ret = realloc(ret, (++(*noNames)) * sizeof(char *))) ||
+         !(ret[*noNames - 1] = malloc(i - startIndex + 1))) {
+        *noNames = 0; //TODO we should free all of the names
+        free(ret);
+        free(tmp);
+        return NULL;
+      }
+      memcpy(ret[*noNames-1], tmp + startIndex, i-startIndex);
+      ret[*noNames - 1][i - startIndex] = '\0';
+      i++;
+      startIndex = i;
+    }
+  }
+  if(! (ret = realloc(ret, (++(*noNames)) * sizeof(char *))) ||
+     ! (ret[*noNames - 1] = malloc(*len - startIndex + 1))) {
+    *noNames = 0;
+   free(ret);
+   free(tmp);
+   return NULL;
+  }
+  memcpy(ret[*noNames - 1], tmp + startIndex, *len - startIndex);
+  ret[ *noNames - 1][ *len - startIndex ] = '\0';
+  *len += 4;
+  free(tmp);
+  return ret;
+}
+char *get_byteArray_str(const byte_array_t arr, uint32_t index) {
+  uint32_t len = byteArray_to_int(arr, index);
+  if(index + 4 + len >= arr->len) {
+    return NULL;
+  }
+  char *ret = malloc(len + 1);
+  memcpy(ret, arr->arr + index + 4, len);
+  ret[len] = '\0';
+  return ret;
 }

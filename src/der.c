@@ -42,14 +42,14 @@ uint8_t decode_private_key(const byte_array_t bytes,
     v = *((der_int_t*)seq.elements[1].value);
     if(v.type!=4) return 1;
     bn_t n = va_arg(args, bn_t);
-    bn_clone(n, (bn_t)v.value);
+    if(!bn_clone(n, (bn_t)v.value)) return 1;
     bn_removezeros(n);
 
     if(seq.elements[3].type != 2) return 1;
     v = *((der_int_t*)seq.elements[3].value);
     if(v.type!=4) return 1;
     bn_t d = va_arg(args, bn_t);
-    bn_clone(d, (bn_t)(v.value));
+    if(!bn_clone(d, (bn_t)(v.value))) return 1;
     bn_removezeros(d);
 
     va_end(args);
@@ -60,35 +60,35 @@ uint8_t decode_private_key(const byte_array_t bytes,
     v = *((der_int_t*)seq.elements[4].value);
     if(v.type!=4) return 1;
     bn_t p = va_arg(args, bn_t);
-    bn_clone(p, (bn_t)v.value);
+    if(!bn_clone(p, (bn_t)v.value)) return 1;
     bn_removezeros(p);
 
     if(seq.elements[5].type != 2) return 1;
     v = *((der_int_t*)seq.elements[5].value);
     if(v.type!=4) return 1;
     bn_t q = va_arg(args, bn_t);
-    bn_clone(q, (bn_t)(v.value));
+    if(!bn_clone(q, (bn_t)(v.value))) return 1;
     bn_removezeros(q);
 
     if(seq.elements[6].type != 2) return 1;
     v = *((der_int_t*)seq.elements[6].value);
     if(v.type!=4) return 1;
     bn_t dP = va_arg(args, bn_t);
-    bn_clone(dP, (bn_t)v.value);
+    if(!bn_clone(dP, (bn_t)v.value)) return 1;
     bn_removezeros(dP);
 
     if(seq.elements[7].type != 2) return 1;
     v = *((der_int_t*)seq.elements[7].value);
     if(v.type!=4) return 1;
     bn_t dQ = va_arg(args, bn_t);
-    bn_clone(dQ, (bn_t)(v.value));
+    if(!bn_clone(dQ, (bn_t)(v.value))) return 1;
     bn_removezeros(dQ);
 
     if(seq.elements[8].type != 2) return 1;
     v = *((der_int_t*)seq.elements[8].value);
     if(v.type!=4) return 1;
     bn_t qInv = va_arg(args, bn_t);
-    bn_clone(qInv, (bn_t)(v.value));
+    if(!bn_clone(qInv, (bn_t)(v.value))) return 1;
     bn_removezeros(qInv);
   } else {
     //never reached
@@ -171,8 +171,8 @@ int32_t decode_der_string(const byte_array_t in, der_val_t **out) {
           new_int->type = 4;
 #ifdef USE_BIGNUM
           bn_t new_bn;
-          bn_init(&new_bn);
-          bn_resize(new_bn, int_length);
+          if(!bn_init(&new_bn)) return -1;
+          if(!bn_resize(new_bn, int_length)) return -1;
           if(get_byteArray_element(in, i) >= 128) {
             bn_setnegative(new_bn);
             int j=0;
@@ -343,7 +343,7 @@ void free_der(der_val_t *val) {
 #ifdef USE_BIGNUM
     if(der_int->type == 4) {
       bn_t der_int_val = (bn_t)(der_int->value);
-      bn_nuke(&der_int_val);
+      bn_deinit(&der_int_val);
     }
 #endif
     free(der_int);
@@ -380,7 +380,7 @@ void print_der_val(const der_val_t der) {
         printf("Integer :: %"PRId64"\n", *((uint64_t *)der_int.value));
         break;
       case 4:
-        printf("Integer :: ");bn_prnt_dec((bignum *)der_int.value);
+        printf("Integer :: ");bn_prnt_dec((bn_t)der_int.value);
         break;
       default:
         printf("Unrecognized integer\n");

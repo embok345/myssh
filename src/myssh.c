@@ -37,7 +37,7 @@ uint8_t get_host(const char *arg,
       }
       char *port_str = malloc(arg_len - i);
       memcpy(port_str, arg+i+1, arg_len - i);
-      if(!isdigit_str(port_str) || strlen(port_str) > 5) {
+      if(!isdigit_s(port_str) || strlen(port_str) > 5) {
         free(port_str);
         return 1;
       }

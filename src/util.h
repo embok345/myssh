@@ -1,6 +1,10 @@
 #ifndef MYSSH_UTIL_H
 #define MYSSH_UTIL_H
 
+#include <inttypes.h>
+
+int echoOff();
+int echoOn();
 char getch();
 uint8_t isdigit_s(const char *);
 void int_to_bytes(uint32_t, uint8_t*);

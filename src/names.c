@@ -24,3 +24,8 @@ const char *MAC_ALGOS[] = {"hmac-sha2-256"};
 
 const uint32_t NO_COM_ALGOS = 1;
 const char *COM_ALGOS[] = {"none"};
+
+const char *AUTH_PUBKEY = "publickey";
+const char *AUTH_PASSWD = "password";
+const char *AUTH_HOST = "hostbased";
+const char *AUTH_INTERACTIVE = "keyboard-interactive";

@@ -1,19 +1,11 @@
 #include "myssh.h"
 #include <readline/readline.h>
+#include <termio.h>
 
-/* Tries to authenticate the user as per rfc4252, using
- * a public key
- * TODO comment
- */
-int user_auth_publickey(connection *con,
-                        const char *user,
-                        const char *algo_name,
-                        const char *pub_key_file,
-                        const char *priv_key_file) {
-  /* Send the userauth service request. This probably shouldn't be here as it
-   * should probably only occur before the first auth attempt.
-   * See rfc4253§10.
-   */
+
+/* Send the userauth service request. */
+
+int service_request(connection *con) {
   char *service_name = "ssh-userauth";
   byte_array_t service_request_message = create_byteArray(1);
   set_byteArray_element(service_request_message, 0, SSH_MSG_SERVICE_REQUEST);
@@ -40,17 +32,162 @@ int user_auth_publickey(connection *con,
   }
   free_pak(service_request_response);
   free_byteArray(service_request_response_name);
+  return MYSSH_AUTH_SUCCESS;
+}
+
+/* Tries to authenticate a user with a password */
+/* NOT IMPLEMENTED */
+int user_auth_passwd(connection *con, const char *user) {
+  return MYSSH_AUTH_FAIL;
+}
+
+int interactive_response(connection *con, byte_array_t message) {
+  uint32_t offset = 1;
+  char *name = get_byteArray_str(message, offset);
+  if(!name) {
+    return MYSSH_AUTH_FAIL;
+  }
+  offset += 4 + strlen(name);
+  char *instruction = get_byteArray_str(message, offset);
+  if(!instruction) {
+    return MYSSH_AUTH_FAIL;
+  }
+  offset += 4 + strlen(instruction);
+  char *lang = get_byteArray_str(message, offset);
+  if(!lang) {
+    return MYSSH_AUTH_FAIL;
+  }
+  offset += 4 + strlen(lang);
+
+  if(strlen(name) > 0)
+    printf("%s\n", name);
+  if(strlen(instruction) > 0)
+    printf("%s\n", instruction);
+
+  uint32_t noPrompts = byteArray_to_int(message, offset);
+  offset += 4;
+  char *prompt;
+  uint8_t echo;
+  char **responses = malloc(noPrompts*sizeof(char *));
+  for(int i=0; i<noPrompts; i++) {
+    prompt = get_byteArray_str(message, offset);
+    if(!prompt) {
+      return MYSSH_AUTH_FAIL;
+    }
+    offset += 4 + strlen(prompt);
+    echo = get_byteArray_element(message, offset);
+    if(!echo) {
+      echoOff();
+      responses[i] = readline(prompt);
+      echoOn();
+      printf("\n");
+    } else {
+      responses[i] = readline(prompt);
+    }
+    free(prompt);
+  }
+
+  byte_array_t info_response = create_byteArray(1);
+  set_byteArray_element(info_response, 0,
+      SSH_MSG_USERAUTH_INFO_RESPONSE);
+  byteArray_append_int(info_response, noPrompts);
+  for(int i=0; i<noPrompts; i++) {
+    byteArray_append_len_str(info_response, responses[i]);
+    free(responses[i]);
+  }
+  free(responses);
+  packet info_response_pak = build_packet(info_response, con);
+  send_packet(info_response_pak, con);
+
+  free(info_response);
+  free_pak(info_response_pak);
+
+  packet info_response_reply = wait_for_packet(con, 3,
+      SSH_MSG_USERAUTH_SUCCESS, SSH_MSG_USERAUTH_FAILURE,
+      SSH_MSG_USERAUTH_INFO_REQUEST);
+
+  uint8_t info_response_reply_code = get_byteArray_element(
+      info_response_reply.payload, 0);
+
+  if(info_response_reply_code == SSH_MSG_USERAUTH_SUCCESS) {
+    printf("Successful auth!");
+    free_pak(info_response_reply);
+    return MYSSH_AUTH_SUCCESS;
+  } else if(info_response_reply_code == SSH_MSG_USERAUTH_INFO_REQUEST) {
+    int success = interactive_response(con, info_response_reply.payload);
+    free_pak(info_response_reply);
+    return success;
+  } else {
+    free_pak(info_response_reply);
+    return MYSSH_AUTH_FAIL; //TODO may be a partial success still
+  }
+}
+
+int user_auth_interactive(connection *con, const char *user) {
+  printf("Trying to do interactive auth\n");
+  char *service_name = "ssh-connection";
+  char *method_name = "keyboard-interactive";
+
+  byte_array_t userauth_request = create_byteArray(1);
+  set_byteArray_element(userauth_request, 0, SSH_MSG_USERAUTH_REQUEST);
+  byteArray_append_len_str(userauth_request, user);
+  byteArray_append_len_str(userauth_request, service_name);
+  byteArray_append_len_str(userauth_request, method_name);
+  byteArray_append_int(userauth_request, 0);
+  byteArray_append_int(userauth_request, 0);
+
+  packet request_pak = build_packet(userauth_request, con);
+  send_packet(request_pak, con);
+  free_pak(request_pak);
+
+  packet response_pak = wait_for_packet(con, 3,
+      SSH_MSG_USERAUTH_SUCCESS, SSH_MSG_USERAUTH_FAILURE,
+      SSH_MSG_USERAUTH_INFO_REQUEST);
+  uint8_t response_code =
+      get_byteArray_element(response_pak.payload, 0);
+  if(response_code == SSH_MSG_USERAUTH_FAILURE) {
+    printf("Couldn't complete interactive auth");
+    free_pak(response_pak);
+    return MYSSH_AUTH_FAIL;//TODO get the reason
+  } else if(response_code == SSH_MSG_USERAUTH_SUCCESS) {
+    free_pak(response_pak);
+    return MYSSH_AUTH_SUCCESS;
+  } else if(response_code != SSH_MSG_USERAUTH_INFO_REQUEST) {
+    //never reached
+    free_pak(response_pak);
+    return MYSSH_AUTH_FAIL;
+  }
+  //The response code is now info_request
+
+  int success = interactive_response(con, response_pak.payload);
+  free_pak(response_pak);
+  return success;
+}
+
+/* Tries to authenticate the user as per rfc4252, using
+ * a public key
+ * TODO comment
+ */
+int user_auth_publickey(connection *con,
+                        const char *user,
+                        const char *algo_name,
+                        const char *pub_key_file,
+                        const char *priv_key_file) {
+
+  if(service_request(con) != MYSSH_AUTH_SUCCESS) {
+    return MYSSH_AUTH_FAIL;
+  }
 
   /* Prepare the userauth-request using publickey, as
    * per rfc4252§7 */
-  service_name = "ssh-connection";
-  char* method_name = "publickey";
+  char *service_name = "ssh-connection";
+  char *method_name = "publickey";
 
   //Try to read the public key from the supplied file.
   //If it fails return an error.
   byte_array_t public_key = create_byteArray(0);
   if(get_public_key(pub_key_file, public_key) == 1)
-    return 1; //TODO probably want this to be more desriptive
+    return MYSSH_AUTH_FAIL;
 
   byte_array_t userauth_request = create_byteArray(1);
   set_byteArray_element(userauth_request, 0, SSH_MSG_USERAUTH_REQUEST);
@@ -92,13 +229,14 @@ int user_auth_publickey(connection *con,
     printf("Wrong public key accepted\n");
     return MYSSH_AUTH_FAIL;
   }
+
   free_byteArray(public_key);
   free_pak(pk_query_response);
 
   /* Once the public key has been accepted in principle,
    * retrieve the private key, and compute the signature */
   bn_t p, q, dP, dQ, qInv;
-  bn_inits(5, &p, &q, &dP, &dQ, &qInv);
+  if(!bn_inits(5, &p, &q, &dP, &dQ, &qInv)) return 1;
   if(get_private_key(priv_key_file, 5, p, q, dP, dQ, qInv) == 1)
     return 1;
 
@@ -113,7 +251,7 @@ int user_auth_publickey(connection *con,
   sign_message(to_sign, algo_name, sig_blob, 5, p, q, dP, dQ, qInv);
 
   free_byteArray(to_sign);
-  bn_nukes(5, &p, &q, &dP, &dQ, &qInv);
+  bn_deinits(5, &p, &q, &dP, &dQ, &qInv);
 
   //The signature is a string of algo_name prepended to the actual signature,
   //both encoded as strings
@@ -137,10 +275,31 @@ int user_auth_publickey(connection *con,
       SSH_MSG_USERAUTH_SUCCESS, SSH_MSG_USERAUTH_FAILURE);
   uint32_t userauth_response_code =
       get_byteArray_element(userauth_response.payload, 0);
+
   if(userauth_response_code == SSH_MSG_USERAUTH_FAILURE) {
-    printf("Auth failed\n");
+    uint32_t length = 0;
+    uint32_t noNames = 0;
+    char **auths_can_proceed = get_byteArray_nameList(
+        userauth_response.payload, 1, &length, &noNames);
+    uint8_t partial_success = get_byteArray_element(
+        userauth_response.payload, length + 1);
+
     free_pak(userauth_response);
-    return MYSSH_AUTH_FAIL;//TODO get more info from failure
+
+    if(partial_success == 0 || noNames == 0) {
+      printf("Auth failed\n");
+      return MYSSH_AUTH_FAIL;
+    }
+
+    if(strcmp(auths_can_proceed[0], AUTH_PASSWD) == 0) {
+      printf("Authenticatied with partial success1\n");
+      return user_auth_passwd(con, user);
+    }
+    if(strcmp(auths_can_proceed[0], AUTH_INTERACTIVE) == 0) {
+      printf("Authenticated with partial success2\n");
+      return user_auth_interactive(con, user);
+    }
+
   } else if(userauth_response_code == SSH_MSG_USERAUTH_SUCCESS) {
     free_pak(userauth_response);
     return MYSSH_AUTH_SUCCESS;
@@ -221,7 +380,7 @@ int sign_message(const byte_array_t to_sign,
   byteArray_append_byteArray(EM, T);
 
   bn_t c, m;
-  bn_inits(2, &c, &m);
+  if(!bn_inits(2, &c, &m)) return 1;
   //mpint_to_bignum(EM.arr, EM.len, c);
   byteArray_to_bignum(EM, c);
 
@@ -229,21 +388,21 @@ int sign_message(const byte_array_t to_sign,
     bn_powmod(c, d, n, m);
   } else {
     bn_t m_1, m_2, h, t1, t2, t3;
-    bn_inits(6, &m_1, &m_2, &h, &t1, &t2, &t3);
+    if(!bn_inits(6, &m_1, &m_2, &h, &t1, &t2, &t3)) return 1;
     bn_powmod(c, dP, p, m_1);
     bn_powmod(c, dQ, q, m_2);
-    bn_subtract(m_1, m_2, t1);
+    bn_sub(m_1, m_2, t1);
     bn_mul(t1, qInv, t2);
     bn_div_rem(t2, p, h);
     bn_mul(q, h, t3);
     bn_add(m_2, t3, m);
-    bn_nukes(6, &m_1, &m_2, &h, &t1, &t2, &t3);
+    bn_deinits(6, &m_1, &m_2, &h, &t1, &t2, &t3);
   }
 
   //bignum_to_byteArray_u(m, sig);
   bignum_to_byteArray_u(m, sig);
 
-  bn_nukes(2, &c, &m);
+  bn_deinits(2, &c, &m);
   free_byteArray(EM);
   free_byteArray(T);
   free_byteArray(hash);
@@ -359,7 +518,10 @@ int get_private_key(const char *file_name, int no_elements, ...) {
   if(encrypted) {
     const byte_array_t iv_bak = copy_byteArray(iv_arr);
     while(1) {
+      echoOff();
       char *pwd_str = readline("Enter rsa private key password: ");
+      echoOn();
+      printf("\n");
       byte_array_t salt = head_byteArray(iv_arr, 8);
       byte_array_t priv_key_pwd = str_to_byteArray(pwd_str);
       free(pwd_str);

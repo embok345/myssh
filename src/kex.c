@@ -45,10 +45,13 @@ uint8_t kex_dh_14_rsa(connection *c,
 
   /* Set up the numbers we need */
   bn_t p, g, x;
-  bn_inits(4, &p, &g, &x, e);
-  bn_set(p, 256, DH_14_BLOCKS, 1);
-  bn_conv_int2bn(2, g);
-  bn_conv_int2bn(10000+(rand()%10000), x);
+  if(!bn_inits(4, &p, &g, &x, e)) return 1;
+  if(!bn_resize( p, 256 )) return 1;
+  for( uint32_t i = 0; i < 256; i++) {
+      bn_setBlock( p, i, DH_14_BLOCKS[i]);
+  }
+  bn_conv_ui2bn(2, g);
+  bn_conv_ui2bn(10000+(rand()%10000), x);
   //TODO this is bad, but the code is too slow if a larger
   //exponent is chosen
   //Compute 2^x mod p
@@ -75,7 +78,7 @@ uint8_t kex_dh_14_rsa(connection *c,
   //The modulus (n) and exponent are encoded in the public key
   //as mpints, so put them into bignums
   bn_t exponent, n;
-  bn_inits(2, &exponent, &n);
+  if(!bn_inits(2, &exponent, &n)) return 1;
   //TODO it would be nice if we could do these in one step
   byte_array_t exponent_bytes = sub_byteArray(*K_S, 15,
       byteArray_to_int(*K_S, 11));
@@ -93,14 +96,14 @@ uint8_t kex_dh_14_rsa(connection *c,
   //The second object should be f = 2^y mod p
   uint32_t len_f = byteArray_to_int(kex_dh_reply.payload,
       5 + len_K_S);
-  bn_init(f);
+  if(!bn_init(f)) return 1;
   byte_array_t f_bytes = sub_byteArray(kex_dh_reply.payload, 9 + len_K_S, len_f);
   byteArray_to_bignum(f_bytes, *f);
   free_byteArray(f_bytes);
   //bn_prnt_dec(*f);
 
   //Now we have f, we can compute K = f^x mod p
-  bn_init(K);
+  if(!bn_init(K)) return 1;
   bn_powmod(*f, x, p, *K);
 
   //The final entry of the packet should be the signature
@@ -113,7 +116,7 @@ uint8_t kex_dh_14_rsa(connection *c,
 
   //Convert the signature to an int
   bn_t s, em;
-  bn_inits(2,&s,&em);
+  if(!bn_inits(2,&s,&em)) return 1;
   uint32_t s_len = byteArray_to_int(sig, 4+label_len);
   byte_array_t s_bytes = sub_byteArray(sig, 8+label_len, s_len);
   byteArray_to_bignum(s_bytes, s);
@@ -126,7 +129,7 @@ uint8_t kex_dh_14_rsa(connection *c,
   *signature = create_byteArray(0);
   bignum_to_byteArray_u(em, *signature);
 
-  bn_nukes(7, &em, &s, &exponent, &n, &p, &g, &x);
+  bn_deinits(7, &em, &s, &exponent, &n, &p, &g, &x);
   free_byteArray(sig);
   free_pak(kex_dh_reply);
 
@@ -584,7 +587,7 @@ uint8_t kex(connection *c, const char *v_c, const char *v_s) {
   pthread_cond_broadcast(&(c->pak.packet_handled));
   pthread_mutex_unlock(&(c->pak.mutex));
 
-  bn_nukes(3, &e, &f, &K);
+  bn_deinits(3, &e, &f, &K);
   free_byteArray(prehash);
   return 0;
 }
