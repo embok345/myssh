@@ -2,12 +2,12 @@
 
 MySSH is a shoddy SSH client.
 
-##Compilation
+## Compilation
 
 Make sure you have the the bignum library.
 
 ```bash
-git clone git://git.poulter.space/bignum.git
+git clone https://github.com/embok345/bignum
 ```
 
 Compile (and optionally install) the bignum library.
